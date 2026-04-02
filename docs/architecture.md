@@ -31,22 +31,29 @@ Each event should carry a stable session identifier, tool name, timestamps, and 
 - Unix domain sockets or local stream IPC for app and bridge communication
 - JSON event envelopes for debugging and adapter simplicity
 
-## Current Demo Slice
+## Current Slice
 
-The current scaffold keeps the bridge server inside the app process for convenience, but the app still talks to it over a Unix socket with newline-delimited JSON envelopes. That means the protocol and transport boundary are already real even though the helper has not been split into a separate process yet.
+The current bridge server still lives inside the app process for convenience, but the transport boundary is now real:
+
+1. Codex runs in the user’s existing terminal session.
+2. Codex invokes a repo-built `VibeIslandHooks` helper from `hooks.json`.
+3. The helper forwards hook payloads to the app bridge over a Unix socket.
+4. The app consumes normalized `AgentEvent` values from that socket and sends approval commands back over the same bridge.
+
+For `PreToolUse`, the hook helper waits for the bridge response. If the island denies the request, the helper writes the blocking JSON shape that Codex already understands. If the app is unavailable, the helper fails open so the terminal flow remains unchanged.
 
 ## Suggested Build Order
 
 1. Define the shared event schema
-2. Build a mock event publisher
-3. Build the overlay UI against the mock stream
-4. Add an interaction channel for approve and answer actions
-5. Replace the mock source with one real adapter
+2. Keep Codex terminal entry unchanged and attach through hooks
+3. Use the mock publisher only as a fallback/demo mode
+4. Harden the approval loop for `PreToolUse`
+5. Add install automation and terminal focus restoration
 
 ## Open Questions
 
-- Should the bridge live inside the app process first, or as a separate helper from day one?
-- Which agent should be the first real integration target?
+- When should the bridge become a standalone launch agent or helper process?
+- How should we install and rollback `hooks.json` safely for users?
 - How much terminal-jump accuracy is possible without private APIs?
 - Which permissions are required for reliable focus restoration across terminals and IDEs?
 

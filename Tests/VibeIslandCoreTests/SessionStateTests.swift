@@ -129,7 +129,7 @@ struct SessionStateTests {
     }
 
     @Test
-    func localBridgeStreamsInitialEventsAndAcceptsReset() async throws {
+    func localBridgeAcceptsResetDemoCommand() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = DemoBridgeServer(socketURL: socketURL)
         try server.start()
@@ -138,18 +138,9 @@ struct SessionStateTests {
         let client = LocalBridgeClient(socketURL: socketURL)
         let stream = try client.connect()
         defer { client.disconnect() }
+        try await client.send(.registerClient(role: .observer))
 
         var iterator = stream.makeAsyncIterator()
-
-        let firstEvent = try await nextEvent(from: &iterator)
-        let secondEvent = try await nextEvent(from: &iterator)
-        let thirdEvent = try await nextEvent(from: &iterator)
-        let firstBatch = [firstEvent, secondEvent, thirdEvent]
-
-        #expect(firstBatch.count == 3)
-        #expect(firstBatch[0].isSessionStarted)
-        #expect(firstBatch[1].isSessionStarted)
-        #expect(firstBatch[2].isSessionStarted)
 
         try await client.send(.resetDemo)
 
@@ -162,6 +153,48 @@ struct SessionStateTests {
         #expect(resetBatch[0].isSessionStarted)
         #expect(resetBatch[1].isSessionStarted)
         #expect(resetBatch[2].isSessionStarted)
+    }
+
+    @Test
+    func codexPreToolUseWaitsForApprovalAndReturnsDenyDirective() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = DemoBridgeServer(socketURL: socketURL, approvalTimeout: 5)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .preToolUse,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "codex-session-1",
+            transcriptPath: nil,
+            turnID: "turn-1",
+            toolName: "Bash",
+            toolUseID: "tool-use-1",
+            toolInput: CodexHookToolInput(command: "rm -rf build")
+        )
+
+        let requestTask = Task {
+            try BridgeCommandClient(socketURL: socketURL).send(.processCodexHook(payload))
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+        let permissionEvent = try await nextEvent(from: &iterator)
+
+        #expect(startedEvent.isSessionStarted)
+        #expect(permissionEvent.isPermissionRequested)
+
+        try await observer.send(.resolvePermission(sessionID: "codex-session-1", approved: false))
+
+        let response = try await requestTask.value
+        #expect(response == .codexHookDirective(.deny(reason: "Permission denied in Vibe Island.")))
     }
 }
 
@@ -182,6 +215,14 @@ private func nextEvent(
 private extension AgentEvent {
     var isSessionStarted: Bool {
         if case .sessionStarted = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    var isPermissionRequested: Bool {
+        if case .permissionRequested = self {
             true
         } else {
             false

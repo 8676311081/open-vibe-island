@@ -9,7 +9,7 @@ final class AppModel {
     var state = SessionState()
     var selectedSessionID: String?
     var isOverlayVisible = false
-    var lastActionMessage = "Connecting to local bridge..."
+    var lastActionMessage = "Waiting for Codex hook events..."
 
     @ObservationIgnored
     private var bridgeTask: Task<Void, Never>?
@@ -39,6 +39,19 @@ final class AppModel {
         do {
             try bridgeServer.start()
             let stream = try bridgeClient.connect()
+
+            Task { [weak self] in
+                guard let self else {
+                    return
+                }
+
+                do {
+                    try await self.bridgeClient.send(.registerClient(role: .observer))
+                    self.lastActionMessage = "Bridge ready. Waiting for Codex hook events."
+                } catch {
+                    self.lastActionMessage = "Failed to register bridge observer: \(error.localizedDescription)"
+                }
+            }
 
             bridgeTask = Task { [weak self] in
                 guard let self else {

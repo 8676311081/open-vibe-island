@@ -67,7 +67,7 @@ struct IslandPanelView: View {
                     }
                 }
             } else {
-                Text("Waiting for mock sessions.")
+                Text("Waiting for Codex hook events.")
                     .foregroundStyle(.secondary)
             }
         }

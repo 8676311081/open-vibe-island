@@ -7,21 +7,33 @@ public final class DemoBridgeServer: @unchecked Sendable {
         let id: UUID
         let fileDescriptor: Int32
         let readSource: DispatchSourceRead
+        var role: BridgeClientRole?
         var buffer = Data()
     }
 
+    private struct PendingApproval {
+        let clientID: UUID
+        let timeoutItem: DispatchWorkItem
+    }
+
     private let socketURL: URL
+    private let approvalTimeout: TimeInterval
     private let queue = DispatchQueue(label: "app.vibeisland.bridge.server")
     private let queueKey = DispatchSpecificKey<Void>()
 
     private var listeningFileDescriptor: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var clients: [UUID: ClientConnection] = [:]
+    private var pendingApprovals: [String: PendingApproval] = [:]
     private var scheduledItems: [DispatchWorkItem] = []
     private var state = SessionState()
 
-    public init(socketURL: URL = BridgeSocketLocation.defaultURL) {
+    public init(
+        socketURL: URL = BridgeSocketLocation.defaultURL,
+        approvalTimeout: TimeInterval = 45
+    ) {
         self.socketURL = socketURL
+        self.approvalTimeout = approvalTimeout
         queue.setSpecific(key: queueKey, value: ())
     }
 
@@ -106,6 +118,9 @@ public final class DemoBridgeServer: @unchecked Sendable {
         scheduledItems.forEach { $0.cancel() }
         scheduledItems.removeAll()
 
+        pendingApprovals.values.forEach { $0.timeoutItem.cancel() }
+        pendingApprovals.removeAll()
+
         let activeConnections = Array(clients.values)
         activeConnections.forEach { $0.readSource.cancel() }
         clients.removeAll()
@@ -168,12 +183,12 @@ public final class DemoBridgeServer: @unchecked Sendable {
         clients[clientID] = ClientConnection(
             id: clientID,
             fileDescriptor: fileDescriptor,
-            readSource: readSource
+            readSource: readSource,
+            role: nil
         )
         readSource.resume()
 
         send(.hello(BridgeHello()), to: clientID)
-        resetDemo(broadcastToAllClients: true)
     }
 
     private func readAvailableData(from clientID: UUID) {
@@ -195,7 +210,7 @@ public final class DemoBridgeServer: @unchecked Sendable {
 
                     for envelope in envelopes {
                         if case let .command(command) = envelope {
-                            handle(command)
+                            handle(command, from: clientID)
                         }
                     }
                 } catch {
@@ -225,6 +240,9 @@ public final class DemoBridgeServer: @unchecked Sendable {
         scheduledItems.forEach { $0.cancel() }
         scheduledItems.removeAll()
 
+        pendingApprovals.values.forEach { $0.timeoutItem.cancel() }
+        pendingApprovals.removeAll()
+
         state = SessionState()
         let initialEvents = MockAgentScenario.initialEvents
         initialEvents.forEach { state.apply($0) }
@@ -238,45 +256,64 @@ public final class DemoBridgeServer: @unchecked Sendable {
         }
     }
 
-    private func handle(_ command: BridgeCommand) {
+    private func handle(_ command: BridgeCommand, from clientID: UUID) {
         switch command {
+        case let .registerClient(role):
+            guard var client = clients[clientID] else {
+                return
+            }
+
+            client.role = role
+            clients[clientID] = client
+            send(.response(.acknowledged), to: clientID)
+
         case .resetDemo:
             resetDemo(broadcastToAllClients: true)
+            send(.response(.acknowledged), to: clientID)
 
         case let .resolvePermission(sessionID, approved):
+            let hasPendingHook = pendingApprovals[sessionID] != nil
             let event: AgentEvent
 
             if approved {
                 event = .activityUpdated(
                     SessionActivityUpdated(
                         sessionID: sessionID,
-                        summary: "Permission approved. Agent resumed work.",
+                        summary: hasPendingHook
+                            ? "Permission approved. Codex continued the command."
+                            : "Permission approved. Agent resumed work.",
                         phase: .running,
                         timestamp: .now
                     )
                 )
-                schedule(
-                    event: .sessionCompleted(
-                        SessionCompleted(
-                            sessionID: sessionID,
-                            summary: "Auth middleware patch applied after approval.",
-                            timestamp: .now.addingTimeInterval(4)
-                        )
-                    ),
-                    after: 4
-                )
+
+                if !hasPendingHook {
+                    schedule(
+                        event: .sessionCompleted(
+                            SessionCompleted(
+                                sessionID: sessionID,
+                                summary: "Auth middleware patch applied after approval.",
+                                timestamp: .now.addingTimeInterval(4)
+                            )
+                        ),
+                        after: 4
+                    )
+                }
             } else {
                 event = .sessionCompleted(
                     SessionCompleted(
                         sessionID: sessionID,
-                        summary: "Permission denied. Review the session in the terminal.",
+                        summary: hasPendingHook
+                            ? "Permission denied in Vibe Island."
+                            : "Permission denied. Review the session in the terminal.",
                         timestamp: .now
                     )
                 )
             }
 
-            state.apply(event)
-            broadcast([.event(event)])
+            emit(event)
+            resolvePendingApproval(sessionID: sessionID, approved: approved)
+            send(.response(.acknowledged), to: clientID)
 
         case let .answerQuestion(sessionID, answer):
             let resumeEvent = AgentEvent.activityUpdated(
@@ -288,8 +325,7 @@ public final class DemoBridgeServer: @unchecked Sendable {
                 )
             )
 
-            state.apply(resumeEvent)
-            broadcast([.event(resumeEvent)])
+            emit(resumeEvent)
             schedule(
                 event: .sessionCompleted(
                     SessionCompleted(
@@ -300,17 +336,201 @@ public final class DemoBridgeServer: @unchecked Sendable {
                 ),
                 after: 4
             )
+            send(.response(.acknowledged), to: clientID)
+
+        case let .processCodexHook(payload):
+            handleCodexHook(payload, from: clientID)
         }
+    }
+
+    private func handleCodexHook(_ payload: CodexHookPayload, from clientID: UUID) {
+        switch payload.hookEventName {
+        case .sessionStart:
+            let event = AgentEvent.sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .codex,
+                    summary: payload.implicitStartSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget
+                )
+            )
+
+            emit(event)
+            send(.response(.acknowledged), to: clientID)
+
+        case .userPromptSubmit:
+            ensureSessionExists(for: payload)
+            let prompt = payload.promptPreview ?? "User submitted a prompt to Codex."
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: "Prompt: \(prompt)",
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .preToolUse:
+            ensureSessionExists(for: payload)
+
+            let command = payload.commandPreview ?? "Bash command"
+            guard hasApprovalObserver(excluding: clientID) else {
+                emit(
+                    .activityUpdated(
+                        SessionActivityUpdated(
+                            sessionID: payload.sessionID,
+                            summary: "Running Bash: \(command)",
+                            phase: .running,
+                            timestamp: .now
+                        )
+                    )
+                )
+                send(.response(.acknowledged), to: clientID)
+                return
+            }
+
+            pendingApprovals[payload.sessionID]?.timeoutItem.cancel()
+
+            let approvalEvent = AgentEvent.permissionRequested(
+                PermissionRequested(
+                    sessionID: payload.sessionID,
+                    request: PermissionRequest(
+                        title: "Run Bash command",
+                        summary: "Codex wants to run a shell command.",
+                        affectedPath: payload.commandText ?? command,
+                        primaryActionTitle: "Allow",
+                        secondaryActionTitle: "Deny"
+                    ),
+                    timestamp: .now
+                )
+            )
+
+            emit(approvalEvent)
+
+            let timeoutItem = DispatchWorkItem { [weak self] in
+                self?.resolveTimedOutApproval(
+                    sessionID: payload.sessionID,
+                    commandPreview: command
+                )
+            }
+
+            pendingApprovals[payload.sessionID] = PendingApproval(
+                clientID: clientID,
+                timeoutItem: timeoutItem
+            )
+            queue.asyncAfter(deadline: .now() + approvalTimeout, execute: timeoutItem)
+
+        case .postToolUse:
+            ensureSessionExists(for: payload)
+            let command = payload.commandPreview ?? "Bash command"
+            let responsePreview = payload.toolResponsePreview
+            let summary = responsePreview.map { "Bash finished: \(command) · \($0)" } ?? "Bash finished: \(command)"
+
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .stop:
+            ensureSessionExists(for: payload)
+            let summary = payload.assistantMessagePreview ?? "Codex completed the turn."
+
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: summary,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+        }
+    }
+
+    private func hasApprovalObserver(excluding clientID: UUID) -> Bool {
+        if clients.values.contains(where: { $0.id != clientID && $0.role == .observer }) {
+            return true
+        }
+
+        return clients.values.contains(where: { $0.id != clientID })
+    }
+
+    private func ensureSessionExists(for payload: CodexHookPayload) {
+        guard state.session(id: payload.sessionID) == nil else {
+            return
+        }
+
+        emit(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .codex,
+                    summary: payload.implicitStartSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget
+                )
+            )
+        )
+    }
+
+    private func resolvePendingApproval(sessionID: String, approved: Bool) {
+        guard let pendingApproval = pendingApprovals.removeValue(forKey: sessionID) else {
+            return
+        }
+
+        pendingApproval.timeoutItem.cancel()
+
+        let response: BridgeResponse
+        if approved {
+            response = .acknowledged
+        } else {
+            response = .codexHookDirective(.deny(reason: "Permission denied in Vibe Island."))
+        }
+
+        send(.response(response), to: pendingApproval.clientID)
+    }
+
+    private func resolveTimedOutApproval(sessionID: String, commandPreview: String) {
+        guard let pendingApproval = pendingApprovals.removeValue(forKey: sessionID) else {
+            return
+        }
+
+        emit(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: sessionID,
+                    summary: "Approval timed out. Codex continued Bash: \(commandPreview)",
+                    phase: .running,
+                    timestamp: .now
+                )
+            )
+        )
+
+        send(.response(.acknowledged), to: pendingApproval.clientID)
+    }
+
+    private func emit(_ event: AgentEvent) {
+        state.apply(event)
+        broadcast([.event(event)])
     }
 
     private func schedule(event: AgentEvent, after delay: TimeInterval) {
         let item = DispatchWorkItem { [weak self] in
-            guard let self else {
-                return
-            }
-
-            self.state.apply(event)
-            self.broadcast([.event(event)])
+            self?.emit(event)
         }
 
         scheduledItems.append(item)
@@ -343,6 +563,16 @@ public final class DemoBridgeServer: @unchecked Sendable {
     private func removeClient(_ clientID: UUID) {
         guard let client = clients.removeValue(forKey: clientID) else {
             return
+        }
+
+        let pendingSessionIDs = pendingApprovals.compactMap { entry -> String? in
+            let (sessionID, pendingApproval) = entry
+            return pendingApproval.clientID == clientID ? sessionID : nil
+        }
+
+        for sessionID in pendingSessionIDs {
+            pendingApprovals[sessionID]?.timeoutItem.cancel()
+            pendingApprovals.removeValue(forKey: sessionID)
         }
 
         client.readSource.cancel()
