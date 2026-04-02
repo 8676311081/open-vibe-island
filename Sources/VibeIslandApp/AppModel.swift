@@ -49,6 +49,7 @@ final class AppModel {
     var codexHookStatus: CodexHookInstallationStatus?
     var claudeStatusLineStatus: ClaudeStatusLineInstallationStatus?
     var claudeUsageSnapshot: ClaudeUsageSnapshot?
+    var codexUsageSnapshot: CodexUsageSnapshot?
     var hooksBinaryURL: URL?
     var overlayDisplayOptions: [OverlayDisplayOption] = []
     var overlayPlacementDiagnostics: OverlayPlacementDiagnostics?
@@ -116,6 +117,9 @@ final class AppModel {
 
     @ObservationIgnored
     private var claudeUsageMonitorTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var codexUsageMonitorTask: Task<Void, Never>?
 
     init() {
         overlayDisplaySelectionID = UserDefaults.standard.string(
@@ -218,6 +222,42 @@ final class AppModel {
         if let cachedAt = snapshot.cachedAt {
             components.append("updated \(relativeTimestampFormatter.localizedString(for: cachedAt, relativeTo: .now))")
         }
+        return components.isEmpty ? nil : components.joined(separator: " · ")
+    }
+
+    var codexUsageStatusTitle: String {
+        if codexUsageSnapshot?.isEmpty == false {
+            return "Codex rate limits detected"
+        }
+
+        return "Waiting for Codex rate limits"
+    }
+
+    var codexUsageStatusSummary: String {
+        if let summary = codexUsageSummaryText {
+            return "Reading the latest local rollout token_count snapshots · \(summary)"
+        }
+
+        return "Passively reading ~/.codex/sessions/**/rollout-*.jsonl and extracting token_count.rate_limits."
+    }
+
+    var codexUsageSummaryText: String? {
+        guard let snapshot = codexUsageSnapshot else {
+            return nil
+        }
+
+        var components = snapshot.windows.map { window in
+            "\(window.label) \(window.roundedUsedPercentage)%"
+        }
+
+        if let planType = snapshot.planType {
+            components.append("plan \(planType)")
+        }
+
+        if let capturedAt = snapshot.capturedAt {
+            components.append("updated \(relativeTimestampFormatter.localizedString(for: capturedAt, relativeTo: .now))")
+        }
+
         return components.isEmpty ? nil : components.joined(separator: " · ")
     }
 
@@ -350,6 +390,8 @@ final class AppModel {
         refreshCodexHookStatus()
         refreshClaudeUsageState()
         startClaudeUsageMonitoringIfNeeded()
+        refreshCodexUsageState()
+        startCodexUsageMonitoringIfNeeded()
         refreshCodexRolloutTracking()
         refreshOverlayDisplayConfiguration()
         ensureOverlayPanel()
@@ -601,6 +643,23 @@ final class AppModel {
                 self.claudeUsageSnapshot = try ClaudeUsageLoader.load()
             } catch {
                 self.lastActionMessage = "Failed to read Claude usage state: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func refreshCodexUsageState() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let snapshot = try await Task.detached(priority: .utility) {
+                    try CodexUsageLoader.load()
+                }.value
+                self.codexUsageSnapshot = snapshot
+            } catch {
+                self.lastActionMessage = "Failed to read Codex usage state: \(error.localizedDescription)"
             }
         }
     }
@@ -989,6 +1048,23 @@ final class AppModel {
             while !Task.isCancelled {
                 self.refreshClaudeUsageState()
                 try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func startCodexUsageMonitoringIfNeeded() {
+        guard codexUsageMonitorTask == nil else {
+            return
+        }
+
+        codexUsageMonitorTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.refreshCodexUsageState()
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }

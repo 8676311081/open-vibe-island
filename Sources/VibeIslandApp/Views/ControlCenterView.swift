@@ -43,6 +43,7 @@ struct ControlCenterView: View {
                 acceptanceCard
                 setupCard
                 claudeUsageCard
+                codexUsageCard
                 overlayCard
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -211,6 +212,58 @@ struct ControlCenterView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.isClaudeUsageSetupBusy || !model.claudeUsageInstalled)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.08))
+        )
+    }
+
+    private var codexUsageCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Codex Usage")
+                        .font(.headline)
+                    Text(model.codexUsageStatusTitle)
+                        .font(.subheadline.weight(.medium))
+                    Text(model.codexUsageStatusSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+                Circle()
+                    .fill(model.codexUsageSnapshot?.isEmpty == false ? Color.mint : Color.blue)
+                    .frame(width: 10, height: 10)
+            }
+
+            if let snapshot = model.codexUsageSnapshot {
+                VStack(alignment: .leading, spacing: 10) {
+                    metadataRow(title: "latest rollout", value: snapshot.sourceFilePath)
+
+                    if let planType = snapshot.planType {
+                        metadataRow(title: "plan", value: planType)
+                    }
+
+                    if let capturedAt = snapshot.capturedAt {
+                        metadataRow(
+                            title: "captured",
+                            value: capturedAt.formatted(date: .abbreviated, time: .standard)
+                        )
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("Refresh") {
+                    model.refreshCodexUsageState()
+                }
+                .buttonStyle(.bordered)
             }
         }
         .padding(16)

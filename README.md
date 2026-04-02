@@ -40,6 +40,7 @@ Current scope:
 - macOS only
 - Codex first
 - experimental Claude Code usage status
+- passive Codex account usage status from local rollout files
 - live session visibility
 - low-noise Codex hook install
 - jump-back behavior
@@ -51,6 +52,7 @@ Today the project can already:
 - receive Codex hook events locally
 - surface session and approval state in the app
 - restore recent Codex sessions from local rollout files and cache
+- read Codex 5-hour and 7-day account windows from the latest local `token_count` rollout event
 - install and uninstall managed Codex hooks from `~/.codex`
 - inspect `~/.claude/settings.json` and install a managed Claude usage bridge when no custom status line exists
 - read cached Claude 5-hour and 7-day usage windows in the UI

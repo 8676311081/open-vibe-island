@@ -342,28 +342,16 @@ struct IslandPanelView: View {
 
     @ViewBuilder
     private var openedUsageSummary: some View {
-        if let snapshot = model.claudeUsageSnapshot,
-           snapshot.isEmpty == false {
+        let providers = openedUsageProviders
+
+        if providers.isEmpty == false {
             HStack(spacing: 8) {
-                Text("Claude")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                    if index > 0 {
+                        usageSeparator(opacity: 0.2)
+                    }
 
-                if let fiveHour = snapshot.fiveHour {
-                    usageWindowView(label: "5h", window: fiveHour)
-                }
-
-                if let fiveHour = snapshot.fiveHour,
-                   let sevenDay = snapshot.sevenDay,
-                   fiveHour.usedPercentage >= 0,
-                   sevenDay.usedPercentage >= 0 {
-                    Text("|")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.16))
-                }
-
-                if let sevenDay = snapshot.sevenDay {
-                    usageWindowView(label: "7d", window: sevenDay)
+                    usageProviderView(provider)
                 }
             }
             .lineLimit(1)
@@ -373,7 +361,7 @@ struct IslandPanelView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
 
-                Text("Claude usage waiting")
+                Text("Usage waiting")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
             }
@@ -381,9 +369,90 @@ struct IslandPanelView: View {
         }
     }
 
-    private func usageWindowView(label: String, window: ClaudeUsageWindow) -> some View {
+    private var openedUsageProviders: [UsageProviderPresentation] {
+        var providers: [UsageProviderPresentation] = []
+
+        if let snapshot = model.claudeUsageSnapshot,
+           snapshot.isEmpty == false {
+            var windows: [UsageWindowPresentation] = []
+
+            if let fiveHour = snapshot.fiveHour {
+                windows.append(
+                    UsageWindowPresentation(
+                        id: "claude-5h",
+                        label: "5h",
+                        usedPercentage: fiveHour.usedPercentage,
+                        resetsAt: fiveHour.resetsAt
+                    )
+                )
+            }
+
+            if let sevenDay = snapshot.sevenDay {
+                windows.append(
+                    UsageWindowPresentation(
+                        id: "claude-7d",
+                        label: "7d",
+                        usedPercentage: sevenDay.usedPercentage,
+                        resetsAt: sevenDay.resetsAt
+                    )
+                )
+            }
+
+            if windows.isEmpty == false {
+                providers.append(
+                    UsageProviderPresentation(
+                        id: "claude",
+                        title: "Claude",
+                        windows: windows
+                    )
+                )
+            }
+        }
+
+        if let snapshot = model.codexUsageSnapshot,
+           snapshot.isEmpty == false {
+            let windows = snapshot.windows.map { window in
+                UsageWindowPresentation(
+                    id: "codex-\(window.key)",
+                    label: window.label,
+                    usedPercentage: window.usedPercentage,
+                    resetsAt: window.resetsAt
+                )
+            }
+
+            if windows.isEmpty == false {
+                providers.append(
+                    UsageProviderPresentation(
+                        id: "codex",
+                        title: "Codex",
+                        windows: windows
+                    )
+                )
+            }
+        }
+
+        return providers
+    }
+
+    private func usageProviderView(_ provider: UsageProviderPresentation) -> some View {
+        HStack(spacing: 8) {
+            Text(provider.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+
+            ForEach(Array(provider.windows.enumerated()), id: \.element.id) { index, window in
+                if index > 0 {
+                    usageSeparator(opacity: 0.16)
+                }
+
+                usageWindowView(window: window)
+            }
+        }
+    }
+
+    private func usageWindowView(window: UsageWindowPresentation) -> some View {
         HStack(spacing: 4) {
-            Text(label)
+            Text(window.label)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
 
@@ -398,6 +467,12 @@ struct IslandPanelView: View {
                     .foregroundStyle(.white.opacity(0.35))
             }
         }
+    }
+
+    private func usageSeparator(opacity: Double) -> some View {
+        Text("|")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(opacity))
     }
 
     private func headerPill(_ title: String, tint: Color) -> some View {
@@ -447,6 +522,23 @@ struct IslandPanelView: View {
 private struct SessionListPresentation {
     let visibleSessions: [AgentSession]
     let hiddenSessionCount: Int
+}
+
+private struct UsageProviderPresentation: Identifiable {
+    let id: String
+    let title: String
+    let windows: [UsageWindowPresentation]
+}
+
+private struct UsageWindowPresentation: Identifiable {
+    let id: String
+    let label: String
+    let usedPercentage: Double
+    let resetsAt: Date?
+
+    var roundedUsedPercentage: Int {
+        Int(usedPercentage.rounded())
+    }
 }
 
 // MARK: - Session row (opened state)
