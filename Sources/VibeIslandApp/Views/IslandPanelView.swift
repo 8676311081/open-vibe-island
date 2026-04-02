@@ -205,24 +205,10 @@ struct IslandPanelView: View {
     @ViewBuilder
     private var openedHeaderContent: some View {
         HStack(spacing: 12) {
-            VibeIslandIcon(size: 14, isAnimating: hasClosedActivity)
-                .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: true)
-                .padding(.leading, 8)
-
             openedUsageSummary
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
-                headerPill("\(model.liveSessionCount) open", tint: .white.opacity(0.7))
-
-                if model.liveRunningCount > 0 {
-                    headerPill("\(model.liveRunningCount) running", tint: .mint.opacity(0.95))
-                }
-
-                if model.liveAttentionCount > 0 {
-                    headerPill("\(model.liveAttentionCount) attention", tint: .orange.opacity(0.95))
-                }
-
                 headerIconButton(
                     systemName: model.isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                     tint: model.isSoundMuted ? .orange.opacity(0.92) : .white.opacity(0.62)
