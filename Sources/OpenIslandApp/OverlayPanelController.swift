@@ -23,6 +23,9 @@ final class OverlayPanelController {
     private static let structuredQuestionCardPerQuestionHeight: CGFloat = 82
     private static let structuredQuestionCardMaximumHeight: CGFloat = 448
     private static let completionCardHeight: CGFloat = 288
+    private static let completionCardBaseHeight: CGFloat = 78
+    private static let completionCardMinHeight: CGFloat = 160
+    private static let completionCardMaxHeight: CGFloat = 380
 
     private var panel: NotchPanel?
     private var eventMonitors = NotchEventMonitors()
@@ -448,7 +451,7 @@ final class OverlayPanelController {
             case .questionCard:
                 return questionCardHeight(for: model.activeIslandCardSession?.questionPrompt)
             case .completionCard:
-                return Self.completionCardHeight
+                return completionCardHeight(for: model)
             case .sessionList:
                 break
             }
@@ -489,6 +492,29 @@ final class OverlayPanelController {
             Self.structuredQuestionCardMaximumHeight,
             Self.structuredQuestionCardBaseHeight + questionBlocksHeight
         )
+    }
+
+    private func completionCardHeight(for model: AppModel) -> CGFloat {
+        guard let session = model.activeIslandCardSession else {
+            return Self.completionCardMinHeight
+        }
+
+        let text = (session.lastAssistantMessageText ?? session.summary)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Estimate text height using NSString measurement with the actual font.
+        // Available text width ≈ notificationPanelWidth - card horizontal chrome
+        // Card chrome: openedContent padding (18*2) + card padding (16*2) + text padding (14*2) = 96
+        let availableWidth = Self.preferredNotificationPanelWidth - 96
+        let font = NSFont.systemFont(ofSize: 13.5, weight: .medium)
+        let textSize = (text as NSString).boundingRect(
+            with: NSSize(width: availableWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+
+        let estimatedHeight = Self.completionCardBaseHeight + ceil(textSize.height) + 28 // 28 = text vertical padding (14*2)
+        return min(Self.completionCardMaxHeight, max(Self.completionCardMinHeight, estimatedHeight))
     }
 
     private func openedVisibleSessions(sessions: [AgentSession]) -> [AgentSession] {

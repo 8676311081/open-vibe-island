@@ -806,7 +806,6 @@ final class AppModel {
             window.orderFrontRegardless()
             window.makeKey()
         }
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
 

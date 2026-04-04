@@ -292,7 +292,7 @@ struct IslandPanelView: View {
             }
 
             headerIconButton(systemName: "gearshape.fill", tint: .white.opacity(0.62)) {
-                model.showControlCenter()
+                model.showSettings()
             }
         }
     }
@@ -1118,7 +1118,6 @@ private struct IslandNotificationCard: View {
                     .padding(.vertical, 14)
             }
             .scrollIndicators(.visible)
-            .frame(minHeight: 0, maxHeight: Self.completionReplyMaxHeight, alignment: .top)
         }
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1472,9 +1471,15 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Button("Open Control Center") {
+            Button("Settings…") {
+                model.showSettings()
+            }
+
+            #if DEBUG
+            Button("Open Debug Panel") {
                 model.showControlCenter()
             }
+            #endif
 
             Text(model.acceptanceStatusTitle)
                 .font(.subheadline.weight(.semibold))

@@ -37,11 +37,14 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
-            if harnessLaunchConfiguration.shouldShowControlCenter {
+            // Hide all windows on launch — settings and debug open on demand only.
+            OpenIslandAppDelegate.hideAllAppWindows()
+
+            if harnessLaunchConfiguration.shouldShowControlCenter,
+               harnessLaunchConfiguration.scenario != nil {
                 model.showControlCenter()
                 harnessRuntimeMonitor.recordMilestone("controlCenterConfigured", message: "shown")
             } else {
-                model.hideControlCenter()
                 harnessRuntimeMonitor.recordMilestone("controlCenterConfigured", message: "hidden")
             }
 
@@ -80,8 +83,14 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    private static func hideAllAppWindows() {
+        for window in NSApp.windows where !window.className.contains("MenuBarExtra") {
+            window.orderOut(nil)
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        model.showControlCenter()
+        model.showSettings()
         return false
     }
 }
@@ -92,9 +101,16 @@ struct OpenIslandApp: App {
     private var appDelegate
 
     var body: some Scene {
+        Window("Open Island Settings", id: "settings") {
+            SettingsView(model: appDelegate.model)
+        }
+        .windowResizability(.contentSize)
+
+        #if DEBUG
         WindowGroup("Open Island Debug") {
             ControlCenterView(model: appDelegate.model)
         }
+        #endif
 
         MenuBarExtra {
             MenuBarContentView(model: appDelegate.model)
@@ -103,9 +119,5 @@ struct OpenIslandApp: App {
                 .accessibilityLabel("Open Island")
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            EmptyView()
-        }
     }
 }
