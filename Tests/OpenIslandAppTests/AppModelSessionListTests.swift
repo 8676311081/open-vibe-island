@@ -461,7 +461,7 @@ struct AppModelSessionListTests {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel()
 
-        let merged = model.mergedWithSyntheticClaudeSessions(
+        let merged = model.monitoring.mergedWithSyntheticClaudeSessions(
             existingSessions: [],
             activeProcesses: [
                 .init(
@@ -504,7 +504,7 @@ struct AppModelSessionListTests {
             )
         )
 
-        let sanitized = model.sanitizeCrossToolGhosttyJumpTargets(in: [misboundClaudeSession])
+        let sanitized = model.monitoring.sanitizeCrossToolGhosttyJumpTargets(in: [misboundClaudeSession])
 
         #expect(sanitized.first?.jumpTarget?.terminalSessionID == nil)
         #expect(sanitized.first?.jumpTarget?.paneTitle == "Claude e45d5e87")
@@ -532,7 +532,7 @@ struct AppModelSessionListTests {
             )
         )
 
-        let merged = model.mergedWithSyntheticClaudeSessions(
+        let merged = model.monitoring.mergedWithSyntheticClaudeSessions(
             existingSessions: [existing],
             activeProcesses: [
                 .init(
@@ -574,7 +574,7 @@ struct AppModelSessionListTests {
             )
         )
 
-        let merged = model.mergedWithSyntheticClaudeSessions(
+        let merged = model.monitoring.mergedWithSyntheticClaudeSessions(
             existingSessions: [existing],
             activeProcesses: [
                 .init(
@@ -629,7 +629,7 @@ struct AppModelSessionListTests {
                 )
             ),
         ]
-        let activeProcesses: [AppModel.ActiveProcessSnapshot] = [
+        let activeProcesses: [ActiveProcessSnapshot] = [
             .init(
                 tool: .claudeCode,
                 sessionID: nil,
@@ -639,7 +639,7 @@ struct AppModelSessionListTests {
             ),
         ]
 
-        let merged = model.mergedWithSyntheticClaudeSessions(
+        let merged = model.monitoring.mergedWithSyntheticClaudeSessions(
             existingSessions: recoveredSessions,
             activeProcesses: activeProcesses,
             now: now
