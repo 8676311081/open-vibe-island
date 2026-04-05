@@ -32,7 +32,7 @@ final class AppModel {
     private weak var controlCenterWindowController: ControlCenterWindowController?
 
     @ObservationIgnored
-    private let bridgeServer = DemoBridgeServer()
+    private let bridgeServer = BridgeServer()
 
     @ObservationIgnored
     private let bridgeClient = LocalBridgeClient()

@@ -2,7 +2,7 @@ import Dispatch
 import Darwin
 import Foundation
 
-public final class DemoBridgeServer: @unchecked Sendable {
+public final class BridgeServer: @unchecked Sendable {
     private struct ClientConnection {
         let id: UUID
         let fileDescriptor: Int32

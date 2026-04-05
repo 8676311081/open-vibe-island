@@ -131,7 +131,7 @@ struct SessionStateTests {
     @Test
     func localBridgeAcceptsResetDemoCommand() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
-        let server = DemoBridgeServer(socketURL: socketURL)
+        let server = BridgeServer(socketURL: socketURL)
         try server.start()
         defer { server.stop() }
 
@@ -158,7 +158,7 @@ struct SessionStateTests {
     @Test
     func codexPreToolUseWaitsForApprovalAndReturnsDenyDirective() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
-        let server = DemoBridgeServer(socketURL: socketURL, approvalTimeout: 5)
+        let server = BridgeServer(socketURL: socketURL, approvalTimeout: 5)
         try server.start()
         defer { server.stop() }
 
