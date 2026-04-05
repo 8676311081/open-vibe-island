@@ -13,7 +13,10 @@ extension AgentSession {
         guard presence != .inactive else { return height }
         if spotlightPromptLineText != nil { height += 22 }   // spacing (6) + text (16)
         if spotlightActivityLineText != nil { height += 20 }  // spacing (6) + text (14)
-        if spotlightSubagentLabel != nil { height += 20 }     // spacing (6) + text (14)
+        if let subagents = claudeMetadata?.activeSubagents, !subagents.isEmpty {
+            height += 20  // spacing (6) + header (14)
+            height += CGFloat(subagents.count) * 18  // each subagent row (spacing 4 + text 14)
+        }
         return height
     }
 }
@@ -904,14 +907,37 @@ private struct IslandSessionRow: View {
                     }
 
                     if showsExpandedContent,
-                       let subagentLabel = session.spotlightSubagentLabel {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 9, weight: .medium))
-                            Text(subagentLabel)
-                                .font(.system(size: 10.5, weight: .medium))
+                       let subagents = session.claudeMetadata?.activeSubagents,
+                       !subagents.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 9, weight: .medium))
+                                Text("Subagents (\(subagents.count))")
+                                    .font(.system(size: 10.5, weight: .medium))
+                            }
+                            .foregroundStyle(.cyan.opacity(0.8))
+
+                            ForEach(subagents, id: \.agentID) { sub in
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(sub.summary != nil
+                                            ? Color(red: 0.29, green: 0.86, blue: 0.46)
+                                            : Color(red: 0.34, green: 0.61, blue: 0.99))
+                                        .frame(width: 6, height: 6)
+                                    Text(sub.agentType ?? sub.agentID)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .lineLimit(1)
+                                    if let summary = sub.summary {
+                                        Text(summary)
+                                            .font(.system(size: 10.5))
+                                            .foregroundStyle(.white.opacity(0.45))
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
                         }
-                        .foregroundStyle(.cyan.opacity(0.8))
                     }
                 }
             }
