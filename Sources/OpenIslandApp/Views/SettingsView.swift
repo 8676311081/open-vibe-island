@@ -142,6 +142,8 @@ struct GeneralSettingsPane: View {
     var model: AppModel
 
     @State private var launchAtLogin = false
+    @State private var confirmingUninstallClaude = false
+    @State private var confirmingUninstallCodex = false
 
     private var lang: LanguageManager { model.lang }
 
@@ -183,11 +185,18 @@ struct GeneralSettingsPane: View {
                     Text("Claude Code")
                     Spacer()
                     if model.claudeHooksInstalled {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(lang.t("settings.general.activated"))
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(lang.t("settings.general.activated"))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button(lang.t("settings.general.uninstall")) {
+                                confirmingUninstallClaude = true
+                            }
+                            .foregroundStyle(.red)
+                            .font(.caption)
                         }
                     } else {
                         Button(lang.t("settings.general.install")) {
@@ -196,16 +205,31 @@ struct GeneralSettingsPane: View {
                         .disabled(model.hooksBinaryURL == nil)
                     }
                 }
+                .alert(lang.t("settings.general.uninstallConfirmTitle"), isPresented: $confirmingUninstallClaude) {
+                    Button(lang.t("settings.general.uninstallConfirmAction"), role: .destructive) {
+                        model.uninstallClaudeHooks()
+                    }
+                    Button(lang.t("settings.general.cancel"), role: .cancel) {}
+                } message: {
+                    Text(lang.t("settings.general.uninstallConfirmMessage.claude"))
+                }
 
                 HStack {
                     Text("Codex")
                     Spacer()
                     if model.codexHooksInstalled {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(lang.t("settings.general.activated"))
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(lang.t("settings.general.activated"))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button(lang.t("settings.general.uninstall")) {
+                                confirmingUninstallCodex = true
+                            }
+                            .foregroundStyle(.red)
+                            .font(.caption)
                         }
                     } else {
                         Button(lang.t("settings.general.install")) {
@@ -213,6 +237,14 @@ struct GeneralSettingsPane: View {
                         }
                         .disabled(model.hooksBinaryURL == nil)
                     }
+                }
+                .alert(lang.t("settings.general.uninstallConfirmTitle"), isPresented: $confirmingUninstallCodex) {
+                    Button(lang.t("settings.general.uninstallConfirmAction"), role: .destructive) {
+                        model.uninstallCodexHooks()
+                    }
+                    Button(lang.t("settings.general.cancel"), role: .cancel) {}
+                } message: {
+                    Text(lang.t("settings.general.uninstallConfirmMessage.codex"))
                 }
             }
         }

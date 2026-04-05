@@ -26,6 +26,12 @@
 "settings.general.cliHooks" = "CLI Hooks";
 "settings.general.activated" = "Activated";
 "settings.general.install" = "Install";
+"settings.general.uninstall" = "Uninstall";
+"settings.general.uninstallConfirmTitle" = "Uninstall Hooks?";
+"settings.general.uninstallConfirmAction" = "Uninstall";
+"settings.general.uninstallConfirmMessage.claude" = "This will remove Open Island hooks from Claude Code. You can reinstall them at any time.";
+"settings.general.uninstallConfirmMessage.codex" = "This will remove Open Island hooks from Codex. You can reinstall them at any time.";
+"settings.general.cancel" = "Cancel";
 "settings.general.language" = "Language";
 "settings.general.languageSystem" = "System";
 "settings.general.languageEnglish" = "English";

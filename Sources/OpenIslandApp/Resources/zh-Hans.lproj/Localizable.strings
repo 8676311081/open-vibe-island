@@ -26,6 +26,12 @@
 "settings.general.cliHooks" = "CLI Hooks";
 "settings.general.activated" = "已激活";
 "settings.general.install" = "安装";
+"settings.general.uninstall" = "卸载";
+"settings.general.uninstallConfirmTitle" = "确认卸载 Hooks？";
+"settings.general.uninstallConfirmAction" = "卸载";
+"settings.general.uninstallConfirmMessage.claude" = "这将从 Claude Code 中移除 Open Island 的 hooks。你可以随时重新安装。";
+"settings.general.uninstallConfirmMessage.codex" = "这将从 Codex 中移除 Open Island 的 hooks。你可以随时重新安装。";
+"settings.general.cancel" = "取消";
 "settings.general.language" = "语言";
 "settings.general.languageSystem" = "跟随系统";
 "settings.general.languageEnglish" = "English";
