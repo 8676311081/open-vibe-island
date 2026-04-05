@@ -99,6 +99,26 @@ def vertical_gradient(size: tuple[int, int], top: str, bottom: str) -> Image.Ima
     return image
 
 
+def diagonal_gradient(size: tuple[int, int], top_left: str, mid: str, bottom_right: str) -> Image.Image:
+    tl = rgba(top_left)
+    m = rgba(mid)
+    br = rgba(bottom_right)
+    image = Image.new("RGBA", size)
+    pixels = image.load()
+    diag = max((size[0] + size[1]) - 2, 1)
+    for y in range(size[1]):
+        for x in range(size[0]):
+            t = (x + y) / diag
+            if t < 0.5:
+                t2 = t * 2
+                color = tuple(round(tl[i] + (m[i] - tl[i]) * t2) for i in range(4))
+            else:
+                t2 = (t - 0.5) * 2
+                color = tuple(round(m[i] + (br[i] - m[i]) * t2) for i in range(4))
+            pixels[x, y] = color
+    return image
+
+
 def draw_shadow(base: Image.Image, box: tuple[int, int, int, int], radius: int, color: str, blur: float) -> None:
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -127,71 +147,14 @@ def draw_app_shell(size: int) -> tuple[Image.Image, tuple[int, int, int, int]]:
     icon_y = (size - icon_size) // 2 - max(2, size // 64)
     outer_radius = max(12, int(icon_size * 0.24))
 
-    draw_shadow(
-        image,
-        (
-            icon_x + max(1, size // 96),
-            icon_y + max(2, size // 42),
-            icon_x + icon_size - max(1, size // 96),
-            icon_y + icon_size + max(4, size // 32),
-        ),
-        outer_radius,
-        "#0000006A",
-        max(6, size / 30),
-    )
+    face_x = icon_x
+    face_y = icon_y
+    face_size = icon_size
+    face_radius = outer_radius
 
-    bezel_gradient = vertical_gradient((icon_size, icon_size), "#B3B8BF", "#585E65")
-    bezel_mask = rounded_mask((icon_size, icon_size), outer_radius)
-    paste_masked(image, bezel_gradient, (icon_x, icon_y), bezel_mask)
-
-    inner_inset = max(4, int(icon_size * 0.035))
-    face_x = icon_x + inner_inset
-    face_y = icon_y + inner_inset
-    face_size = icon_size - inner_inset * 2
-    face_radius = max(10, int(outer_radius * 0.88))
-
-    face_gradient = vertical_gradient((face_size, face_size), "#34373C", "#080A0D")
+    face_gradient = diagonal_gradient((face_size, face_size), "#B8F0A8", "#88E0C0", "#78CCE8")
     face_mask = rounded_mask((face_size, face_size), face_radius)
     paste_masked(image, face_gradient, (face_x, face_y), face_mask)
-
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle(
-        (icon_x, icon_y, icon_x + icon_size - 1, icon_y + icon_size - 1),
-        radius=outer_radius,
-        outline=rgba("#D0D4D9", 54),
-        width=max(1, size // 256),
-    )
-    draw.rounded_rectangle(
-        (face_x, face_y, face_x + face_size - 1, face_y + face_size - 1),
-        radius=face_radius,
-        outline=rgba("#FFFFFF", 28),
-        width=max(1, size // 256),
-    )
-
-    gloss_height = int(face_size * 0.46)
-    gloss = Image.new("RGBA", (face_size, gloss_height), (0, 0, 0, 0))
-    gloss_pixels = gloss.load()
-    height = max(gloss_height - 1, 1)
-    for y in range(gloss_height):
-        alpha = round(50 * (1 - y / height))
-        for x in range(face_size):
-            gloss_pixels[x, y] = (255, 255, 255, alpha)
-    gloss_mask = rounded_mask((face_size, face_size), face_radius).crop((0, 0, face_size, gloss_height))
-    paste_masked(image, gloss, (face_x, face_y), gloss_mask)
-
-    belly = Image.new("RGBA", (face_size, int(face_size * 0.38)), (0, 0, 0, 0))
-    belly_draw = ImageDraw.Draw(belly)
-    belly_draw.ellipse(
-        (
-            int(face_size * 0.08),
-            int(face_size * -0.58),
-            int(face_size * 0.92),
-            int(face_size * 0.62),
-        ),
-        fill=rgba("#FFFFFF", 28),
-    )
-    belly = belly.filter(ImageFilter.GaussianBlur(max(3, size / 56)))
-    paste_masked(image, belly, (face_x, face_y + int(face_size * 0.62)), belly.split()[-1])
 
     return image, (face_x, face_y, face_size, face_size)
 
@@ -250,12 +213,12 @@ def render_app_icon(size: int) -> Image.Image:
     origin_y = face_y + (face_height - mark_height) // 2
 
     palette = {
-        "B": rgba("#F2F1EE"),
-        "H": rgba("#FFFFFF"),
+        "B": rgba("#264653"),
+        "H": rgba("#E9F5F2"),
         "E": rgba("#1A1C20"),
     }
 
-    draw_mark_shadow(draw, (origin_x, origin_y), cell, SCOUT_PATTERN, 82)
+    draw_mark_shadow(draw, (origin_x, origin_y), cell, SCOUT_PATTERN, 60)
     draw_mark(draw, (origin_x, origin_y), cell, palette, include_punctuation=False)
     return image
 
@@ -321,10 +284,18 @@ def render_badge(size: int) -> Image.Image:
 
 
 def write_app_icons() -> None:
-    for filename, _, _, pixel_size in APP_ICON_SPECS:
-        icon = render_app_icon(pixel_size)
-        icon.save(APP_ICONSET_DIR / filename)
-        icon.save(ICONSET_DIR / filename)
+    cat_icon_path = BRAND_ROOT / "app-icon-cat.png"
+    if cat_icon_path.exists():
+        src = Image.open(cat_icon_path).convert("RGBA")
+        for filename, _, _, pixel_size in APP_ICON_SPECS:
+            resized = src.resize((pixel_size, pixel_size), Image.Resampling.LANCZOS)
+            resized.save(APP_ICONSET_DIR / filename)
+            resized.save(ICONSET_DIR / filename)
+    else:
+        for filename, _, _, pixel_size in APP_ICON_SPECS:
+            icon = render_app_icon(pixel_size)
+            icon.save(APP_ICONSET_DIR / filename)
+            icon.save(ICONSET_DIR / filename)
 
 
 def write_internal_assets() -> None:
@@ -371,8 +342,8 @@ def build_icns() -> None:
 def write_svg_master(path: Path) -> None:
     pixel_rects = []
     palette = {
-        "B": "#F2F1EE",
-        "H": "#FFFFFF",
+        "B": "#264653",
+        "H": "#E9F5F2",
         "E": "#1A1C20",
     }
 
@@ -391,33 +362,21 @@ def write_svg_master(path: Path) -> None:
 
     svg = f"""<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bezel" x1="152" y1="140" x2="824" y2="824" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B3B8BF"/>
-      <stop offset="1" stop-color="#585E65"/>
-    </linearGradient>
-    <linearGradient id="face" x1="176" y1="164" x2="176" y2="848" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#34373C"/>
-      <stop offset="1" stop-color="#080A0D"/>
+    <linearGradient id="face" x1="140" y1="128" x2="884" y2="872" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B8F0A8"/>
+      <stop offset="0.5" stop-color="#88E0C0"/>
+      <stop offset="1" stop-color="#78CCE8"/>
     </linearGradient>
     <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="white" stop-opacity="0.16"/>
+      <stop stop-color="white" stop-opacity="0.12"/>
       <stop offset="1" stop-color="white" stop-opacity="0"/>
     </linearGradient>
-    <filter id="shadow" x="92" y="108" width="840" height="860" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="36" stdDeviation="38" flood-color="black" flood-opacity="0.34"/>
-    </filter>
-    <filter id="markShadow" x="216" y="256" width="566" height="488" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="12" dy="12" stdDeviation="0" flood-color="black" flood-opacity="0.32"/>
-    </filter>
   </defs>
-  <g filter="url(#shadow)">
-    <rect x="140" y="128" width="744" height="744" rx="178" fill="url(#bezel)"/>
-    <rect x="166" y="154" width="692" height="692" rx="154" fill="url(#face)"/>
-    <rect x="166" y="154" width="692" height="324" rx="154" fill="url(#gloss)"/>
-    <rect x="166.5" y="154.5" width="691" height="691" rx="153.5" stroke="white" stroke-opacity="0.08"/>
-    <rect x="140.5" y="128.5" width="743" height="743" rx="177.5" stroke="white" stroke-opacity="0.14"/>
+  <g>
+    <rect x="140" y="128" width="744" height="744" rx="178" fill="url(#face)"/>
+    <rect x="140" y="128" width="744" height="348" rx="178" fill="url(#gloss)"/>
   </g>
-  <g filter="url(#markShadow)">
+  <g>
     {"".join(pixel_rects)}
   </g>
 </svg>

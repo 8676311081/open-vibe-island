@@ -1,32 +1,20 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bezel" x1="152" y1="140" x2="824" y2="824" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B3B8BF"/>
-      <stop offset="1" stop-color="#585E65"/>
-    </linearGradient>
-    <linearGradient id="face" x1="176" y1="164" x2="176" y2="848" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#34373C"/>
-      <stop offset="1" stop-color="#080A0D"/>
+    <linearGradient id="face" x1="140" y1="128" x2="884" y2="872" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B8F0A8"/>
+      <stop offset="0.5" stop-color="#88E0C0"/>
+      <stop offset="1" stop-color="#78CCE8"/>
     </linearGradient>
     <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="white" stop-opacity="0.16"/>
+      <stop stop-color="white" stop-opacity="0.12"/>
       <stop offset="1" stop-color="white" stop-opacity="0"/>
     </linearGradient>
-    <filter id="shadow" x="92" y="108" width="840" height="860" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="36" stdDeviation="38" flood-color="black" flood-opacity="0.34"/>
-    </filter>
-    <filter id="markShadow" x="216" y="256" width="566" height="488" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="12" dy="12" stdDeviation="0" flood-color="black" flood-opacity="0.32"/>
-    </filter>
   </defs>
-  <g filter="url(#shadow)">
-    <rect x="140" y="128" width="744" height="744" rx="178" fill="url(#bezel)"/>
-    <rect x="166" y="154" width="692" height="692" rx="154" fill="url(#face)"/>
-    <rect x="166" y="154" width="692" height="324" rx="154" fill="url(#gloss)"/>
-    <rect x="166.5" y="154.5" width="691" height="691" rx="153.5" stroke="white" stroke-opacity="0.08"/>
-    <rect x="140.5" y="128.5" width="743" height="743" rx="177.5" stroke="white" stroke-opacity="0.14"/>
+  <g>
+    <rect x="140" y="128" width="744" height="744" rx="178" fill="url(#face)"/>
+    <rect x="140" y="128" width="744" height="348" rx="178" fill="url(#gloss)"/>
   </g>
-  <g filter="url(#markShadow)">
-    <rect x="372" y="268" width="58" height="58" fill="#F2F1EE"/><rect x="546" y="268" width="58" height="58" fill="#F2F1EE"/><rect x="372" y="326" width="58" height="58" fill="#F2F1EE"/><rect x="430" y="326" width="58" height="58" fill="#F2F1EE"/><rect x="488" y="326" width="58" height="58" fill="#F2F1EE"/><rect x="546" y="326" width="58" height="58" fill="#F2F1EE"/><rect x="314" y="384" width="58" height="58" fill="#F2F1EE"/><rect x="372" y="384" width="58" height="58" fill="#FFFFFF"/><rect x="430" y="384" width="58" height="58" fill="#FFFFFF"/><rect x="488" y="384" width="58" height="58" fill="#FFFFFF"/><rect x="546" y="384" width="58" height="58" fill="#FFFFFF"/><rect x="604" y="384" width="58" height="58" fill="#F2F1EE"/><rect x="256" y="442" width="58" height="58" fill="#F2F1EE"/><rect x="314" y="442" width="58" height="58" fill="#F2F1EE"/><rect x="372" y="442" width="58" height="58" fill="#FFFFFF"/><rect x="430" y="442" width="58" height="58" fill="#1A1C20"/><rect x="488" y="442" width="58" height="58" fill="#FFFFFF"/><rect x="546" y="442" width="58" height="58" fill="#1A1C20"/><rect x="604" y="442" width="58" height="58" fill="#F2F1EE"/><rect x="662" y="442" width="58" height="58" fill="#F2F1EE"/><rect x="314" y="500" width="58" height="58" fill="#F2F1EE"/><rect x="372" y="500" width="58" height="58" fill="#FFFFFF"/><rect x="430" y="500" width="58" height="58" fill="#FFFFFF"/><rect x="488" y="500" width="58" height="58" fill="#FFFFFF"/><rect x="546" y="500" width="58" height="58" fill="#FFFFFF"/><rect x="604" y="500" width="58" height="58" fill="#F2F1EE"/><rect x="372" y="558" width="58" height="58" fill="#F2F1EE"/><rect x="430" y="558" width="58" height="58" fill="#F2F1EE"/><rect x="488" y="558" width="58" height="58" fill="#F2F1EE"/><rect x="546" y="558" width="58" height="58" fill="#F2F1EE"/><rect x="314" y="616" width="58" height="58" fill="#F2F1EE"/><rect x="604" y="616" width="58" height="58" fill="#F2F1EE"/>
+  <g>
+    <rect x="372" y="268" width="58" height="58" fill="#264653"/><rect x="546" y="268" width="58" height="58" fill="#264653"/><rect x="372" y="326" width="58" height="58" fill="#264653"/><rect x="430" y="326" width="58" height="58" fill="#264653"/><rect x="488" y="326" width="58" height="58" fill="#264653"/><rect x="546" y="326" width="58" height="58" fill="#264653"/><rect x="314" y="384" width="58" height="58" fill="#264653"/><rect x="372" y="384" width="58" height="58" fill="#E9F5F2"/><rect x="430" y="384" width="58" height="58" fill="#E9F5F2"/><rect x="488" y="384" width="58" height="58" fill="#E9F5F2"/><rect x="546" y="384" width="58" height="58" fill="#E9F5F2"/><rect x="604" y="384" width="58" height="58" fill="#264653"/><rect x="256" y="442" width="58" height="58" fill="#264653"/><rect x="314" y="442" width="58" height="58" fill="#264653"/><rect x="372" y="442" width="58" height="58" fill="#E9F5F2"/><rect x="430" y="442" width="58" height="58" fill="#1A1C20"/><rect x="488" y="442" width="58" height="58" fill="#E9F5F2"/><rect x="546" y="442" width="58" height="58" fill="#1A1C20"/><rect x="604" y="442" width="58" height="58" fill="#264653"/><rect x="662" y="442" width="58" height="58" fill="#264653"/><rect x="314" y="500" width="58" height="58" fill="#264653"/><rect x="372" y="500" width="58" height="58" fill="#E9F5F2"/><rect x="430" y="500" width="58" height="58" fill="#E9F5F2"/><rect x="488" y="500" width="58" height="58" fill="#E9F5F2"/><rect x="546" y="500" width="58" height="58" fill="#E9F5F2"/><rect x="604" y="500" width="58" height="58" fill="#264653"/><rect x="372" y="558" width="58" height="58" fill="#264653"/><rect x="430" y="558" width="58" height="58" fill="#264653"/><rect x="488" y="558" width="58" height="58" fill="#264653"/><rect x="546" y="558" width="58" height="58" fill="#264653"/><rect x="314" y="616" width="58" height="58" fill="#264653"/><rect x="604" y="616" width="58" height="58" fill="#264653"/>
   </g>
 </svg>
