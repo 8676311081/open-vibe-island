@@ -2,152 +2,167 @@
 
 ## 1. Problem Statement
 
-The current session state management architecture is overly complex. It uses a 3-state attachment model (`attached`/`stale`/`detached`) with 6+ reconciliation passes running every 3 seconds, involving AppleScript terminal snapshots, multi-pass matching algorithms, grace windows, synthetic session creation, and CWD-based fallback matching. This makes it fragile and hard to extend — every new terminal (e.g., cmux) requires patches in multiple code paths.
+The current session state management is overly complex. A 3-state attachment model (`attached`/`stale`/`detached`) with 6+ reconciliation passes, AppleScript snapshots driving visibility, multi-pass matching, 15-minute grace windows, synthetic session creation, and CWD-based fallback matching. Every new terminal (e.g., cmux) requires patches across multiple code paths.
 
-The reference product (Vibe Island) achieves the same UX with a much simpler model:
-- Only maintains active sessions (3 in their data store vs our 29)
+The reference product (Vibe Island) achieves the same UX with a simpler model:
+- Only maintains active sessions
 - Simple status: `processing` / `waiting_for_input`
-- When process exits → session disappears from list
-- No complex attachment state machine
+- Process exits → session disappears
+- No attachment state machine
 
-The core insight: **session visibility should be a direct function of process liveness, not a continuously recomputed attachment state.**
+**Core principle: sessions should map 1:1 to the user's terminal sessions. Claude starts → session appears. Claude exits → session disappears. No grace windows, no lingering.**
 
-## 2. New State Model
+## 2. Dual-Signal Model: Hooks + Process Discovery
 
-### Session Lifecycle
+Session lifecycle is driven by two complementary signal sources:
 
-```
-[Hook: sessionStarted OR Process discovered] --> ACTIVE
-ACTIVE --> ACTIVE  (hook updates, metadata updates, phase changes)
-ACTIVE --> REMOVED (process exits AND no pending interaction AND grace period elapsed)
-```
+### Hooks (primary, fast, rich)
+- **SessionStart** → create session immediately with full metadata (prompt, terminal info, etc.)
+- **PreToolUse / PostToolUse / Notification / etc.** → update session state
+- **SessionEnd** → mark session as ended, remove from display immediately
 
-### Simplified State
+### Process Discovery (secondary, polling every 3s, fallback)
+- Discovers running agent processes via `ps`/`lsof`
+- Creates sessions for processes that have no hook-originated session (e.g., hooks not configured)
+- Removes sessions whose process is no longer found
 
-**Remove `SessionAttachmentState` entirely.** Replace with:
-
-```swift
-// On AgentSession:
-var isProcessAlive: Bool          // set by process discovery
-var lastProcessSeenAt: Date?      // for brief grace window on process exit
-```
-
-**Remove `SessionOrigin`** — replace with `isDemoSession` computed property.
+The two sources complement each other:
+| Scenario | Hooks | Process Discovery |
+|---|---|---|
+| Normal startup | SessionStart fires immediately | Confirms process exists within 3s |
+| Normal exit | SessionEnd fires immediately | Confirms process gone within 3s |
+| Hooks not configured | Nothing | Creates session from process within 3s |
+| Process killed (no SessionEnd) | Nothing | Detects process gone within 3s |
+| Brief process detection gap | Hook activity keeps session alive | Resumes seeing process next cycle |
 
 ### Visibility Rule
 
-A session appears in the UI if:
-1. `isProcessAlive == true`, OR
-2. `phase.requiresAttention` (waiting for approval/answer), OR
-3. `isDemoSession`, OR
-4. Time since `lastProcessSeenAt` < 10 seconds (jitter absorption)
+A session is visible if and only if:
+1. Process is alive (confirmed by latest process discovery), OR
+2. Phase requires user attention (`waitingForApproval` / `waitingForAnswer`), OR
+3. Session received a hook event within the last polling cycle (3s) — covers the brief gap between SessionStart hook and first process discovery
 
-A session is **removed from state** when:
-- `isProcessAlive == false` AND `lastProcessSeenAt` > 60 seconds AND `!phase.requiresAttention`
+A session is removed when:
+- Process is not found AND no recent hook activity AND phase doesn't require attention
 
-## 3. What Changes in Each File
+**No grace windows.** No 60-second delays. No 15-minute stale periods. The session disappears within one polling cycle (~3 seconds) of the process exiting, just like the reference product.
 
-### Remove entirely (~1170 lines)
-- `Sources/OpenIslandApp/TerminalSessionAttachmentProbe.swift`
+## 3. New State Model
 
-### New file (~250 lines)
-- `Sources/OpenIslandApp/TerminalJumpTargetResolver.swift` — extracted from the probe, only handles jump target precision (AppleScript snapshots for Ghostty/Terminal.app), never drives visibility
+### Remove
+- `SessionAttachmentState` enum (attached/stale/detached) — **delete entirely**
+- `SessionOrigin` enum — replace with `isDemoSession` computed property
+- All grace window constants (`liveGraceWindow`, `staleGraceWindow`, `inactiveClaudeMatchWindow`)
+
+### Add to `AgentSession`
+```swift
+var isProcessAlive: Bool = false       // updated by process discovery every 3s
+var lastHookActivityAt: Date?          // updated on every hook event
+```
+
+### Visibility (replaces `isAttachedToTerminal`)
+```swift
+var isVisibleInIsland: Bool {
+    if isDemoSession { return true }
+    if phase.requiresAttention { return true }
+    if isProcessAlive { return true }
+    if let lastHook = lastHookActivityAt,
+       Date.now.timeIntervalSince(lastHook) < 5 { return true }
+    return false
+}
+```
+
+## 4. What Changes in Each File
+
+### Delete entirely
+- `Sources/OpenIslandApp/TerminalSessionAttachmentProbe.swift` (1170 lines)
+- `Sources/OpenIslandCore/ClaudeSessionRegistry.swift` (159 lines) — or gut to ~30 lines for pending-interaction persistence only
+
+### New file
+- `Sources/OpenIslandApp/TerminalJumpTargetResolver.swift` (~250 lines) — extracted from probe, handles jump target precision via AppleScript snapshots. **Only affects jump accuracy, never visibility.**
 
 ### `Sources/OpenIslandCore/AgentSession.swift`
-- **Remove**: `SessionAttachmentState`, `SessionOrigin`, `attachmentState`, `origin`, `isAttachedToTerminal`, `isTrackedLiveSession`
-- **Add**: `isProcessAlive: Bool`, `lastProcessSeenAt: Date?`
+- Remove: `SessionAttachmentState`, `SessionOrigin`, `attachmentState`, `origin`, `isAttachedToTerminal`
+- Add: `isProcessAlive`, `lastHookActivityAt`, `isVisibleInIsland` computed property
 
 ### `Sources/OpenIslandCore/SessionState.swift`
-- **Remove**: `reconcileAttachmentStates()`, `reconcileJumpTargets()`, attachment-based counts
-- **Add**: `removeSession(id:)`, `markProcessAlive(sessionID:alive:at:)`, `removeDeadSessions(olderThan:)`
+- Remove: `reconcileAttachmentStates()`, `reconcileJumpTargets()`, attachment-based counts
+- Add: `markProcessAlive()`, `removeSession()`, `removeInvisibleSessions()`
 
 ### `Sources/OpenIslandApp/AppModel.swift` (~450 lines removed)
-- **Remove**: `mergedWithSyntheticClaudeSessions()` and all synthetic infrastructure, `adoptProcessTTYsForClaudeSessions()`, `sanitizeCrossToolGhosttyJumpTargets()`, `mergeAttachmentState()`, `liveAttachmentKey()`, complex `displayPriority()`
-- **Rewrite**: `reconcileSessionAttachments()` (70→30 lines), `computeSessionBuckets()` (35→10 lines)
-
-### `Sources/OpenIslandCore/ClaudeSessionRegistry.swift`
-- **Delete entirely** or gut to only persist pending-interaction sessions (~30 lines)
+- Remove: synthetic session infrastructure, `adoptProcessTTYsForClaudeSessions`, `sanitizeCrossToolGhosttyJumpTargets`, `mergeAttachmentState`, `liveAttachmentKey`, complex `displayPriority`
+- Rewrite `reconcileSessionAttachments()`: discover processes → mark alive/dead → remove invisible → update jump targets
+- Rewrite `computeSessionBuckets()`: filter by `isVisibleInIsland`, sort by attention > running > updatedAt
 
 ### `Sources/OpenIslandCore/DemoBridgeServer.swift`
-- **Keep as-is** — hook event model is sound
+- Keep as-is. Add `lastHookActivityAt = Date.now` when processing any hook event.
 
-## 4. Migration Phases
+## 5. Migration Phases
 
-### Phase 1: Add `isProcessAlive` in parallel (LOW RISK)
-- Add `isProcessAlive` and `lastProcessSeenAt` to `AgentSession`
-- Populate in `reconcileSessionAttachments()` from process discovery
-- Log discrepancies between old attachment model and new liveness model
-- Write `SessionLivenessTests.swift`
+### Phase 1: Add new fields in parallel (LOW RISK)
+- Add `isProcessAlive` and `lastHookActivityAt` to `AgentSession`
+- Populate from process discovery and hook events
+- Log discrepancies vs old attachment model
+- Write tests for new liveness model
+- **No behavior change**
 
-**Rollback**: Remove two fields.
+### Phase 2: Extract `TerminalJumpTargetResolver` (LOW RISK)
+- Move AppleScript snapshot + jump target matching logic to new focused type
+- Old probe stays unchanged
+- Verify jump targets match
+- **No behavior change**
 
-### Phase 2: Create `TerminalJumpTargetResolver` (LOW RISK)
-- Extract jump-target-relevant logic from attachment probe into new type
-- Keep old probe unchanged — new type is additive
-- Verify jump targets match between old and new path
+### Phase 3: Switch visibility model (MEDIUM RISK)
+- `computeSessionBuckets` uses `isVisibleInIsland` instead of `isAttachedToTerminal`
+- Stop calling old attachment probe for visibility
+- Keep calling `TerminalJumpTargetResolver` for jump precision
+- **Behavior change: sessions disappear faster after exit**
 
-**Rollback**: Delete new file, revert AppModel.
-
-### Phase 3: Switch visibility to `isProcessAlive` (MEDIUM RISK)
-- Rewrite `computeSessionBuckets()` to use `isProcessAlive`
-- Remove overflow bucket
-- Simplify `displayPriority()` to simple sort
-- Stop calling `TerminalSessionAttachmentProbe.sessionResolutionReport()`
-
-**Rollback**: Revert to Phase 2 state.
-
-### Phase 4: Session cleanup and removal (MEDIUM RISK)
-- Implement automatic session removal (60s after process exit)
-- Remove synthetic session creation
+### Phase 4: Session removal + cleanup (MEDIUM RISK)
+- Implement `removeInvisibleSessions()` — actually remove dead sessions from state
+- Remove synthetic session creation — process discovery creates sessions directly
 - Remove `adoptProcessTTYsForClaudeSessions`
-- Add `SessionState.removeSession(id:)`
+- **Behavior change: session count stays small**
 
-**Rollback**: Revert to Phase 3 state.
-
-### Phase 5: Remove dead code (LOW RISK)
-- Delete `TerminalSessionAttachmentProbe.swift` (1170 lines)
-- Delete `ClaudeSessionRegistry.swift` (159 lines)
+### Phase 5: Delete dead code (LOW RISK)
+- Delete `TerminalSessionAttachmentProbe.swift`
+- Delete `ClaudeSessionRegistry.swift` (or gut)
 - Remove `SessionAttachmentState`, `SessionOrigin` enums
-- Clean up all attachment-related helpers
-- Update/delete affected tests
+- Clean up tests
+- **~1000 lines removed**
 
-**Rollback**: Git revert.
-
-## 5. Verification Plan
+## 6. Verification Plan
 
 ### Key Scenarios
-1. Session appears when agent starts (within 3 seconds)
-2. Session disappears when agent exits (within ~60 seconds)
-3. Jump to Ghostty/Terminal.app/cmux terminal works
-4. Permission approval flow works
+1. Start Claude → session appears within 3s
+2. Exit Claude → session disappears within 3s
+3. Jump to Ghostty/Terminal.app/cmux works
+4. Permission approval flow works end-to-end
 5. Question answering flow works
-6. Notification fires correctly
-7. Subagent display (metadata on parent, not separate session)
+6. Notification fires on completion
+7. Subagent shows as parent metadata, not separate session
 8. Multiple terminals simultaneously
-9. App restart recovery (session reappears within 3 seconds)
-10. Process-only session (no hooks configured)
-11. Codex session lifecycle
-12. Demo mode unaffected
+9. App restart → sessions reappear within 3s
+10. Codex sessions work
+11. Demo mode unaffected
 
 ### Before/After Comparison
-During Phase 1-2, log per-cycle comparisons of old `attached` set vs new `isProcessAlive` set. Investigate all discrepancies.
+Phase 1-2: log old `attached` set vs new `isProcessAlive` set per cycle. All discrepancies must be explained as intentional simplification or bugs.
 
 ### Risk Areas
-1. **Ghostty jump precision**: Resolver reuses existing matching logic, but needs validation
-2. **Session flicker**: 10-second grace on `lastProcessSeenAt` absorbs jitter
-3. **"Completed idle" behavior change**: Sessions disappear ~60s after exit vs current 15-minute grace — intentional, matches reference product
-4. **Restart persistence loss**: Only pending interactions are persisted — acceptable since process discovery reconstructs active sessions
+1. **Jump precision regression** — mitigated by reusing existing matching logic in resolver
+2. **Completed session visibility change** — intentional, matches reference product
+3. **Restart metadata loss** — acceptable since process discovery + hooks rebuild state within seconds
 
-## 6. Impact Summary
+## 7. Impact Summary
 
 | Metric | Before | After |
 |---|---|---|
 | TerminalSessionAttachmentProbe | 1170 lines | 0 (deleted) |
 | TerminalJumpTargetResolver (new) | 0 | ~250 lines |
 | AppModel session management | ~750 lines | ~300 lines |
-| SessionState | 250 lines | ~200 lines |
-| ClaudeSessionRegistry | 159 lines | 0 or ~30 lines |
-| Attachment state values | 3 | 0 (removed) |
-| Grace window constants | 3 (120s, 15min, 120s) | 1 (60s) |
-| Reconciliation passes | 6+ | 2 |
+| Attachment state values | 3 | 0 (deleted) |
+| Grace windows | 3 (120s, 15min, 120s) | 0 |
+| Reconciliation passes per cycle | 6+ | 2 |
+| Persisted sessions | All (29) | Only pending-interaction |
 | **Net lines removed** | | **~1000** |
