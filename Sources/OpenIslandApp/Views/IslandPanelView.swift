@@ -343,10 +343,7 @@ struct IslandPanelView: View {
 
     private var openedContent: some View {
         VStack(spacing: 0) {
-            if let session = model.activeIslandCardSession,
-               model.showsNotificationCard {
-                notificationCard(session: session)
-            } else if model.shouldShowSessionBootstrapPlaceholder {
+            if model.shouldShowSessionBootstrapPlaceholder {
                 sessionBootstrapPlaceholder
             } else if displayedSessions.isEmpty {
                 emptyState
@@ -393,6 +390,10 @@ struct IslandPanelView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var actionableSessionID: String? {
+        model.islandSurface.sessionID
+    }
+
     private var sessionList: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollView(.vertical, showsIndicators: false) {
@@ -401,6 +402,9 @@ struct IslandPanelView: View {
                         IslandSessionRow(
                             session: session,
                             referenceDate: context.date,
+                            isActionable: session.id == actionableSessionID,
+                            onApprove: { model.approvePermission(for: session.id, approved: $0) },
+                            onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
                             onJump: { model.jumpToSession(session) }
                         )
                     }
@@ -415,15 +419,6 @@ struct IslandPanelView: View {
                 alignment: .top
             )
         }
-    }
-
-    private func notificationCard(session: AgentSession) -> some View {
-        IslandNotificationCard(
-            session: session,
-            onApprove: { model.approvePermission(for: session.id, approved: $0) },
-            onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
-            onJump: { model.jumpToSession(session) }
-        )
     }
 
     private var displayedSessions: [AgentSession] {
@@ -854,6 +849,9 @@ private struct OpenedHeaderMetrics {
 private struct IslandSessionRow: View {
     let session: AgentSession
     let referenceDate: Date
+    var isActionable: Bool = false
+    var onApprove: ((Bool) -> Void)?
+    var onAnswer: ((QuestionPromptResponse) -> Void)?
     let onJump: () -> Void
 
     @State private var isHighlighted = false
@@ -865,78 +863,273 @@ private struct IslandSessionRow: View {
     private func rowBody(referenceDate: Date) -> some View {
         let presence = session.islandPresence(at: referenceDate)
         let showsExpandedContent = presence != .inactive
-        return HStack(alignment: .top, spacing: 14) {
-            statusDot(for: presence)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 14) {
+                statusDot(for: presence)
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 12) {
-                    Text(session.spotlightHeadlineText)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(headlineColor(for: presence))
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(session.spotlightHeadlineText)
+                            .font(.system(size: isActionable ? 15 : 14, weight: .semibold))
+                            .foregroundStyle(headlineColor(for: presence))
+                            .lineLimit(1)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    HStack(spacing: 6) {
-                        compactBadge(session.tool.displayName, presence: presence)
-                        if let terminalBadge = session.spotlightTerminalBadge {
-                            compactBadge(terminalBadge, presence: presence)
+                        HStack(spacing: 6) {
+                            compactBadge(session.tool.displayName, presence: presence)
+                            if let terminalBadge = session.spotlightTerminalBadge {
+                                compactBadge(terminalBadge, presence: presence)
+                            }
+                            compactBadge(session.spotlightAgeBadge, presence: presence)
                         }
-                        compactBadge(session.spotlightAgeBadge, presence: presence)
                     }
-                }
 
-                if showsExpandedContent,
-                   let promptLine = session.spotlightPromptLineText {
-                    Text(promptLine)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .lineLimit(1)
-                }
-
-                if showsExpandedContent,
-                   let activityLine = session.spotlightActivityLineText {
-                    Text(activityLine)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(activityColor(for: presence).opacity(0.94))
-                        .lineLimit(1)
-                }
-
-                if showsExpandedContent,
-                   let subagentLabel = session.spotlightSubagentLabel {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 9, weight: .medium))
-                        Text(subagentLabel)
-                            .font(.system(size: 10.5, weight: .medium))
+                    if showsExpandedContent || isActionable,
+                       let promptLine = isActionable
+                        ? session.notificationHeaderPromptLineText
+                        : session.spotlightPromptLineText {
+                        Text(promptLine)
+                            .font(.system(size: isActionable ? 12 : 11.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(isActionable ? 0.66 : 0.62))
+                            .lineLimit(isActionable ? 2 : 1)
                     }
-                    .foregroundStyle(.cyan.opacity(0.8))
+
+                    if !isActionable, showsExpandedContent,
+                       let activityLine = session.spotlightActivityLineText {
+                        Text(activityLine)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(activityColor(for: presence).opacity(0.94))
+                            .lineLimit(1)
+                    }
+
+                    if showsExpandedContent,
+                       let subagentLabel = session.spotlightSubagentLabel {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 9, weight: .medium))
+                            Text(subagentLabel)
+                                .font(.system(size: 10.5, weight: .medium))
+                        }
+                        .foregroundStyle(.cyan.opacity(0.8))
+                    }
                 }
             }
+            .padding(.horizontal, isActionable ? 16 : 14)
+            .padding(.vertical, isActionable ? 14 : 12)
+
+            if isActionable {
+                actionableBody
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(isHighlighted ? Color.white.opacity(0.05) : Color.black)
+            RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous)
+                .fill(isHighlighted ? Color.white.opacity(isActionable ? 0.06 : 0.05) : Color.black)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(isHighlighted ? .white.opacity(0.24) : .white.opacity(0.04))
+            RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous)
+                .strokeBorder(actionableBorderColor)
         )
         .shadow(color: isHighlighted ? .black.opacity(0.24) : .clear, radius: 8, y: 6)
         .overlay(
-            Rectangle()
-                .fill(Color.white.opacity(isHighlighted ? 0 : 0.02))
-                .frame(height: 1),
+            Group {
+                if !isActionable {
+                    Rectangle()
+                        .fill(Color.white.opacity(isHighlighted ? 0 : 0.02))
+                        .frame(height: 1)
+                }
+            },
             alignment: .bottom
         )
         .drawingGroup()
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
         .onTapGesture(perform: handlePrimaryTap)
         .onHover { hovering in
-            isHighlighted = hovering
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHighlighted = hovering
+            }
         }
+    }
+
+    private var actionableBorderColor: Color {
+        if isActionable {
+            return actionableStatusTint.opacity(isHighlighted ? 0.45 : 0.28)
+        }
+        return isHighlighted ? .white.opacity(0.24) : .white.opacity(0.04)
+    }
+
+    private var actionableStatusTint: Color {
+        switch session.phase {
+        case .waitingForApproval:
+            .orange
+        case .waitingForAnswer:
+            .yellow
+        case .running:
+            Color(red: 0.34, green: 0.61, blue: 0.99)
+        case .completed:
+            Color(red: 0.29, green: 0.86, blue: 0.46)
+        }
+    }
+
+    @ViewBuilder
+    private var actionableBody: some View {
+        switch session.phase {
+        case .waitingForApproval:
+            approvalActionBody
+        case .waitingForAnswer:
+            questionActionBody
+        case .completed:
+            completionActionBody
+        case .running:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Approval action area
+
+    private var approvalActionBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.orange)
+                Text(commandLabel)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.orange)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(commandPreviewText)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let path = session.permissionRequest?.affectedPath.trimmedForNotificationCard,
+                   !path.isEmpty {
+                    Text(path)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(red: 0.11, green: 0.08, blue: 0.03))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.orange.opacity(0.18))
+            )
+
+            HStack(spacing: 10) {
+                Button(denyTitle) { onApprove?(false) }
+                    .buttonStyle(IslandWideButtonStyle(kind: .secondary))
+                Button(allowTitle) { onApprove?(true) }
+                    .buttonStyle(IslandWideButtonStyle(kind: .primary))
+            }
+        }
+    }
+
+    // MARK: - Question action area
+
+    private var questionActionBody: some View {
+        StructuredQuestionPromptView(
+            prompt: session.questionPrompt,
+            onAnswer: { onAnswer?($0) }
+        )
+    }
+
+    // MARK: - Completion action area
+
+    private var completionActionBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(completionPromptLabel)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(2)
+
+                Spacer(minLength: 8)
+
+                Text("Done")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color(red: 0.29, green: 0.86, blue: 0.46).opacity(0.96))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Rectangle()
+                .fill(.white.opacity(0.04))
+                .frame(height: 1)
+
+            ScrollView(.vertical) {
+                Markdown(completionMessageText)
+                    .markdownTheme(.completionCard)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+            }
+            .scrollIndicators(.visible)
+            .frame(maxHeight: 260)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.white.opacity(0.08))
+        )
+    }
+
+    // MARK: - Actionable helpers
+
+    private var completionPromptLabel: String {
+        if let prompt = session.latestUserPromptText?.trimmedForNotificationCard, !prompt.isEmpty {
+            return "You: \(prompt)"
+        }
+        return "You:"
+    }
+
+    private var completionMessageText: String {
+        session.lastAssistantMessageText?.trimmedForNotificationCard ?? session.summary
+    }
+
+    private var commandLabel: String {
+        switch session.currentToolName {
+        case "exec_command", "Bash": return "Bash"
+        case "AskUserQuestion": return "Question"
+        case "ExitPlanMode": return "Plan"
+        case "apply_patch": return "Patch"
+        case "write_stdin": return "Input"
+        case let value?: return value.capitalized
+        case nil: return "Command"
+        }
+    }
+
+    private var commandPreviewText: String {
+        let preview = session.currentCommandPreviewText?.trimmedForNotificationCard
+        if let preview, !preview.isEmpty {
+            return "$ \(preview)"
+        }
+        return session.permissionRequest?.summary.trimmedForNotificationCard ?? session.summary.trimmedForNotificationCard
+    }
+
+    private var allowTitle: String {
+        let title = session.permissionRequest?.primaryActionTitle.trimmedForNotificationCard
+        if title == nil || title == "Allow" {
+            return "Allow Once"
+        }
+        return title ?? "Allow Once"
+    }
+
+    private var denyTitle: String {
+        session.permissionRequest?.secondaryActionTitle.trimmedForNotificationCard ?? "Deny"
     }
 
     private func statusDot(for presence: IslandSessionPresence) -> some View {
@@ -1000,292 +1193,6 @@ private struct IslandSessionRow: View {
         case .ready:
             presence == .inactive ? .white.opacity(0.46) : statusTint(for: presence)
         }
-    }
-}
-
-private struct IslandNotificationCard: View {
-    private static let completionReplyMaxHeight: CGFloat = 260
-
-    let session: AgentSession
-    let onApprove: (Bool) -> Void
-    let onAnswer: (QuestionPromptResponse) -> Void
-    let onJump: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 14) {
-                Circle()
-                    .fill(statusTint)
-                    .frame(width: 10, height: 10)
-                    .padding(.top, 6)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .top, spacing: 12) {
-                        Text(session.spotlightHeadlineText)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 8)
-
-                        HStack(spacing: 6) {
-                            compactBadge(session.tool.displayName)
-                            if let terminalBadge = session.spotlightTerminalBadge {
-                                compactBadge(terminalBadge)
-                            }
-                            compactBadge(session.spotlightAgeBadge)
-                        }
-                    }
-
-                    if let promptLine = session.notificationHeaderPromptLineText {
-                        Text(promptLine)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.66))
-                            .lineLimit(2)
-                    }
-                }
-            }
-
-            cardBody
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(isHovered ? Color.white.opacity(0.06) : Color.black)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(statusTint.opacity(isHovered ? 0.45 : 0.28))
-        )
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
-        .onTapGesture {
-            onJump()
-        }
-    }
-
-    @ViewBuilder
-    private var cardBody: some View {
-        switch session.phase {
-        case .waitingForApproval:
-            approvalBody
-        case .waitingForAnswer:
-            questionBody
-        case .completed:
-            completionBody
-        case .running:
-            defaultBody
-        }
-    }
-
-    private var approvalBody: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.orange)
-
-                Text(commandLabel)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.orange)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(commandPreviewText)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let path = session.permissionRequest?.affectedPath.trimmedForNotificationCard,
-                   !path.isEmpty {
-                    Text(path)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(red: 0.11, green: 0.08, blue: 0.03))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.orange.opacity(0.18))
-            )
-
-            HStack(spacing: 10) {
-                Button(denyTitle) { onApprove(false) }
-                    .buttonStyle(IslandWideButtonStyle(kind: .secondary))
-                Button(allowTitle) { onApprove(true) }
-                    .buttonStyle(IslandWideButtonStyle(kind: .primary))
-            }
-        }
-    }
-
-    private var questionBody: some View {
-        Text(session.questionPrompt?.title ?? "Question")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.yellow.opacity(0.96))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.04))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(0.06))
-            )
-    }
-
-    private var completionBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                Text(completionPromptLabel)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .lineLimit(2)
-
-                Spacer(minLength: 8)
-
-                Text("Done")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(completionAccent.opacity(0.96))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-
-            Rectangle()
-                .fill(.white.opacity(0.04))
-                .frame(height: 1)
-
-            ScrollView(.vertical) {
-                Markdown(completionMessageText)
-                    .markdownTheme(.completionCard)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 14)
-            }
-            .scrollIndicators(.visible)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.08))
-        )
-    }
-
-    private var defaultBody: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(session.spotlightActivityLineText ?? session.summary)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(statusTint.opacity(0.95))
-                .lineLimit(3)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.06))
-        )
-    }
-
-    private var statusTint: Color {
-        switch session.phase {
-        case .waitingForApproval:
-            .orange
-        case .waitingForAnswer:
-            .yellow
-        case .running:
-            Color(red: 0.34, green: 0.61, blue: 0.99)
-        case .completed:
-            completionAccent
-        }
-    }
-
-    private var completionAccent: Color {
-        Color(red: 0.29, green: 0.86, blue: 0.46)
-    }
-
-    private var completionPromptLabel: String {
-        if let prompt = session.latestUserPromptText?.trimmedForNotificationCard, !prompt.isEmpty {
-            return "You: \(prompt)"
-        }
-        return "You:"
-    }
-
-    private var completionMessageText: String {
-        session.lastAssistantMessageText?.trimmedForNotificationCard ?? session.summary
-    }
-
-    private var commandLabel: String {
-        switch session.currentToolName {
-        case "exec_command":
-            return "Bash"
-        case "Bash":
-            return "Bash"
-        case "AskUserQuestion":
-            return "Question"
-        case "ExitPlanMode":
-            return "Plan"
-        case "apply_patch":
-            return "Patch"
-        case "write_stdin":
-            return "Input"
-        case let value?:
-            return value.capitalized
-        case nil:
-            return "Command"
-        }
-    }
-
-    private var commandPreviewText: String {
-        let preview = session.currentCommandPreviewText?.trimmedForNotificationCard
-        if let preview, !preview.isEmpty {
-            return "$ \(preview)"
-        }
-
-        return session.permissionRequest?.summary.trimmedForNotificationCard ?? session.summary.trimmedForNotificationCard
-    }
-
-    private var allowTitle: String {
-        let title = session.permissionRequest?.primaryActionTitle.trimmedForNotificationCard
-        if title == nil || title == "Allow" {
-            return "Allow Once"
-        }
-        return title ?? "Allow Once"
-    }
-
-    private var denyTitle: String {
-        session.permissionRequest?.secondaryActionTitle.trimmedForNotificationCard ?? "Deny"
-    }
-
-    private func compactBadge(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.68))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
-            .background(Color(red: 0.14, green: 0.14, blue: 0.15), in: Capsule())
     }
 }
 
