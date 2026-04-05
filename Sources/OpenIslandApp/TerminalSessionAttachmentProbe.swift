@@ -198,8 +198,35 @@ struct TerminalSessionAttachmentProbe {
             // For sessions from unsupported terminals, keep them
             // attached if they have an active process OR were recently active
             // via hooks (origin == .live and updated recently).
+            // However, skip the recent-hook grace when the session's working
+            // directory is contested: either another session at the same CWD
+            // already owns a process, or an unassigned process shares the CWD
+            // (ambiguous match).
             let isActiveProcess = activeProcessesBySessionID[session.id] != nil
-            let isRecentHookSession = session.origin == .live
+            let cwdContested: Bool = {
+                guard !isActiveProcess,
+                      let cwd = normalizedPathForMatching(session.jumpTarget?.workingDirectory) else {
+                    return false
+                }
+                let peerOwnsProcess = activeProcessesBySessionID.contains { entry in
+                    entry.key != session.id
+                        && normalizedPathForMatching(
+                            sessions.first(where: { $0.id == entry.key })?.jumpTarget?.workingDirectory
+                        ) == cwd
+                }
+                if peerOwnsProcess { return true }
+                let unassignedProcessSharesCWD = activeProcesses.contains { process in
+                    process.tool == .claudeCode
+                        && !activeSessionIDs.contains(where: {
+                            activeProcessesBySessionID[$0]?.terminalTTY == process.terminalTTY
+                                && activeProcessesBySessionID[$0]?.workingDirectory == process.workingDirectory
+                        })
+                        && normalizedPathForMatching(process.workingDirectory) == cwd
+                }
+                return unassignedProcessSharesCWD
+            }()
+            let isRecentHookSession = !cwdContested
+                && session.origin == .live
                 && now.timeIntervalSince(session.updatedAt) < Self.staleGraceWindow
             resolutions[session.id] = SessionResolution(
                 attachmentState: (isActiveProcess || isRecentHookSession)

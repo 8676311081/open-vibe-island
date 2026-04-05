@@ -185,7 +185,7 @@ struct ClaudeHooksTests {
         let preToolResponse = try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(preToolPayload))
         #expect(preToolResponse == .acknowledged)
 
-        let requestTask = Task {
+        let requestTask = Task.detached {
             try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(permissionPayload))
         }
 
@@ -270,7 +270,7 @@ struct ClaudeHooksTests {
 
         _ = try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(preToolPayload))
 
-        let requestTask = Task {
+        let requestTask = Task.detached {
             try BridgeCommandClient(socketURL: socketURL).send(.processClaudeHook(permissionPayload))
         }
 

@@ -211,9 +211,13 @@ struct AppModelSessionListTests {
         #expect(model.notchOpenReason == nil)
         #expect(model.islandSurface == .sessionList)
 
-        try await Task.sleep(for: .milliseconds(450))
+        let expected = "Focused the matching Ghostty terminal."
+        for _ in 0..<20 {
+            if model.lastActionMessage == expected { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
 
-        #expect(model.lastActionMessage == "Focused the matching Ghostty terminal.")
+        #expect(model.lastActionMessage == expected)
     }
 
     @Test
