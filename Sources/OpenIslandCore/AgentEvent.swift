@@ -155,6 +155,22 @@ public struct ClaudeSessionMetadataUpdated: Equatable, Codable, Sendable {
     }
 }
 
+public struct ActionableStateResolved: Equatable, Codable, Sendable {
+    public var sessionID: String
+    public var summary: String
+    public var timestamp: Date
+
+    public init(
+        sessionID: String,
+        summary: String,
+        timestamp: Date
+    ) {
+        self.sessionID = sessionID
+        self.summary = summary
+        self.timestamp = timestamp
+    }
+}
+
 public enum AgentEvent: Equatable, Codable, Sendable {
     case sessionStarted(SessionStarted)
     case activityUpdated(SessionActivityUpdated)
@@ -164,6 +180,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
     case jumpTargetUpdated(JumpTargetUpdated)
     case sessionMetadataUpdated(SessionMetadataUpdated)
     case claudeSessionMetadataUpdated(ClaudeSessionMetadataUpdated)
+    case actionableStateResolved(ActionableStateResolved)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -175,6 +192,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case jumpTargetUpdated
         case sessionMetadataUpdated
         case claudeSessionMetadataUpdated
+        case actionableStateResolved
     }
 
     private enum EventType: String, Codable {
@@ -186,6 +204,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case jumpTargetUpdated
         case sessionMetadataUpdated
         case claudeSessionMetadataUpdated
+        case actionableStateResolved
     }
 
     public init(from decoder: any Decoder) throws {
@@ -210,6 +229,10 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case .claudeSessionMetadataUpdated:
             self = .claudeSessionMetadataUpdated(
                 try container.decode(ClaudeSessionMetadataUpdated.self, forKey: .claudeSessionMetadataUpdated)
+            )
+        case .actionableStateResolved:
+            self = .actionableStateResolved(
+                try container.decode(ActionableStateResolved.self, forKey: .actionableStateResolved)
             )
         }
     }
@@ -242,6 +265,9 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case let .claudeSessionMetadataUpdated(payload):
             try container.encode(EventType.claudeSessionMetadataUpdated, forKey: .type)
             try container.encode(payload, forKey: .claudeSessionMetadataUpdated)
+        case let .actionableStateResolved(payload):
+            try container.encode(EventType.actionableStateResolved, forKey: .type)
+            try container.encode(payload, forKey: .actionableStateResolved)
         }
     }
 }

@@ -153,6 +153,108 @@ struct SessionStateTests {
     }
 
     @Test
+    func actionableStateResolvedClearsWaitingForApproval() {
+        let startedAt = Date(timeIntervalSince1970: 5_000)
+        var state = SessionState(
+            sessions: [
+                AgentSession(
+                    id: "claude-approval",
+                    title: "Claude · repo",
+                    tool: .claudeCode,
+                    attachmentState: .attached,
+                    phase: .waitingForApproval,
+                    summary: "Wants to edit file",
+                    updatedAt: startedAt,
+                    permissionRequest: PermissionRequest(
+                        title: "Edit file",
+                        summary: "Wants to edit file",
+                        affectedPath: "src/main.ts"
+                    )
+                )
+            ]
+        )
+
+        state.apply(
+            .actionableStateResolved(
+                ActionableStateResolved(
+                    sessionID: "claude-approval",
+                    summary: "Approval was handled outside Open Island.",
+                    timestamp: startedAt.addingTimeInterval(10)
+                )
+            )
+        )
+
+        #expect(state.session(id: "claude-approval")?.phase == .running)
+        #expect(state.session(id: "claude-approval")?.permissionRequest == nil)
+        #expect(state.session(id: "claude-approval")?.summary == "Approval was handled outside Open Island.")
+    }
+
+    @Test
+    func actionableStateResolvedClearsWaitingForAnswer() {
+        let startedAt = Date(timeIntervalSince1970: 5_500)
+        var state = SessionState(
+            sessions: [
+                AgentSession(
+                    id: "claude-question",
+                    title: "Claude · repo",
+                    tool: .claudeCode,
+                    attachmentState: .attached,
+                    phase: .waitingForAnswer,
+                    summary: "Which environment?",
+                    updatedAt: startedAt,
+                    questionPrompt: QuestionPrompt(
+                        title: "Which environment?",
+                        options: ["Production", "Staging"]
+                    )
+                )
+            ]
+        )
+
+        state.apply(
+            .actionableStateResolved(
+                ActionableStateResolved(
+                    sessionID: "claude-question",
+                    summary: "Approval was handled outside Open Island.",
+                    timestamp: startedAt.addingTimeInterval(10)
+                )
+            )
+        )
+
+        #expect(state.session(id: "claude-question")?.phase == .running)
+        #expect(state.session(id: "claude-question")?.questionPrompt == nil)
+    }
+
+    @Test
+    func actionableStateResolvedIsNoOpWhenAlreadyRunning() {
+        let startedAt = Date(timeIntervalSince1970: 6_000)
+        var state = SessionState(
+            sessions: [
+                AgentSession(
+                    id: "claude-running",
+                    title: "Claude · repo",
+                    tool: .claudeCode,
+                    phase: .running,
+                    summary: "Working on it",
+                    updatedAt: startedAt
+                )
+            ]
+        )
+
+        state.apply(
+            .actionableStateResolved(
+                ActionableStateResolved(
+                    sessionID: "claude-running",
+                    summary: "Should not change anything.",
+                    timestamp: startedAt.addingTimeInterval(10)
+                )
+            )
+        )
+
+        #expect(state.session(id: "claude-running")?.phase == .running)
+        #expect(state.session(id: "claude-running")?.summary == "Working on it")
+    }
+
+    @Test
     func preservesLiveSessionOriginFromStartEvent() {
         var state = SessionState()
 

@@ -162,6 +162,22 @@ public struct SessionState: Equatable, Sendable {
             session.claudeMetadata = payload.claudeMetadata.isEmpty ? nil : payload.claudeMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
+
+        case let .actionableStateResolved(payload):
+            guard var session = sessionsByID[payload.sessionID] else {
+                return
+            }
+
+            guard session.phase == .waitingForApproval || session.phase == .waitingForAnswer else {
+                return
+            }
+
+            session.phase = .running
+            session.summary = payload.summary
+            session.permissionRequest = nil
+            session.questionPrompt = nil
+            session.updatedAt = payload.timestamp
+            upsert(session)
         }
     }
 
