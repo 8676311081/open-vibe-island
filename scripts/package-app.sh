@@ -47,10 +47,11 @@ cp "$setup_binary" "$bundle_dir/Contents/Helpers/OpenIslandSetup"
 cp "$brand_icon" "$bundle_dir/Contents/Resources/OpenIsland.icns"
 
 # Copy SPM resource bundle — required by Bundle.module at runtime (localization etc.).
-# SPM places it next to the executable in the build dir; we mirror that in the app bundle.
+# SPM's generated accessor looks for it at Bundle.main.bundleURL (the .app root),
+# so it must be copied there — NOT into Contents/MacOS/.
 spm_resource_bundle="$build_bin_dir/OpenIsland_OpenIslandApp.bundle"
 if [[ -d "$spm_resource_bundle" ]]; then
-    cp -R "$spm_resource_bundle" "$bundle_dir/Contents/MacOS/"
+    cp -R "$spm_resource_bundle" "$bundle_dir/"
 else
     echo "WARNING: SPM resource bundle not found at $spm_resource_bundle — app may crash on launch." >&2
 fi
