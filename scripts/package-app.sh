@@ -54,11 +54,11 @@ else
     echo "WARNING: Sparkle.framework not found at $sparkle_framework — run 'swift package resolve' first." >&2
 fi
 
-# Copy SPM resource bundle into Contents/Resources/ so Bundle.module can find it
-# and codesign does not complain about unsealed contents in the bundle root.
+# Copy SPM resource bundle to .app root — SPM's generated Bundle.module accessor
+# searches Bundle.main.bundleURL (the .app root), NOT Contents/Resources/.
 spm_resource_bundle="$build_bin_dir/OpenIsland_OpenIslandApp.bundle"
 if [[ -d "$spm_resource_bundle" ]]; then
-    cp -R "$spm_resource_bundle" "$bundle_dir/Contents/Resources/"
+    cp -R "$spm_resource_bundle" "$bundle_dir/"
 else
     echo "WARNING: SPM resource bundle not found at $spm_resource_bundle — app may crash on launch." >&2
 fi
@@ -121,7 +121,7 @@ for required in \
     "Contents/Helpers/OpenIslandHooks" \
     "Contents/Helpers/OpenIslandSetup" \
     "Contents/Resources/OpenIsland.icns" \
-    "Contents/Resources/OpenIsland_OpenIslandApp.bundle" \
+    "OpenIsland_OpenIslandApp.bundle" \
 ; do
     if [[ ! -e "$bundle_dir/$required" ]]; then
         echo "ERROR: missing required file: $required" >&2
