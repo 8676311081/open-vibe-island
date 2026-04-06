@@ -6,5 +6,18 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <!-- Items are added by the release workflow. See docs/releasing.md. -->
+        <item>
+            <title>Version 0.1.6</title>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>0.1.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Sun, 06 Apr 2026 00:00:00 +0000</pubDate>
+            <enclosure
+                url="https://github.com/Octane0411/open-vibe-island/releases/download/v0.1.6/Open.Island.zip"
+                type="application/octet-stream"
+                sparkle:edSignature="OgNgltzkr4q3xCDicJmh6rarVW7hQ34zjaxy7mARciKMvOiHl4vS9q2YCXuz/MVthrbh8nFM/LR4hlI03qLgDQ=="
+                length="5218435"
+            />
+        </item>
     </channel>
 </rss>
