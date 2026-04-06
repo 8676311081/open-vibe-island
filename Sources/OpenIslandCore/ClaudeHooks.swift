@@ -883,6 +883,7 @@ public extension ClaudeHookPayload {
     private func shouldUseFocusedTerminalLocator(for terminalApp: String) -> Bool {
         let lower = terminalApp.lowercased()
         return !lower.contains("ghostty") && lower != "cmux"
+            && lower != "kaku" && lower != "wezterm"
     }
 
     private func isGhosttyTerminalApp(_ terminalApp: String?) -> Bool {
@@ -992,6 +993,10 @@ public extension ClaudeHookPayload {
             // CMUX_WORKSPACE_ID / CMUX_SOCKET_PATH, so reaching here means
             // genuine Ghostty.
             return "Ghostty"
+        case .some("kaku"):
+            return "Kaku"
+        case .some("wezterm"):
+            return "WezTerm"
         default:
             return nil
         }
