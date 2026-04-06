@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+skip_setup=false
+for arg in "$@"; do
+  case "$arg" in
+    --skip-setup) skip_setup=true ;;
+  esac
+done
+
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 build_root="$repo_root/.build/arm64-apple-macosx/debug"
 app_binary="$build_root/OpenIslandApp"
@@ -20,7 +27,9 @@ swift build -c debug --product OpenIslandHooks
 swift build -c debug --product OpenIslandSetup
 
 python3 "$brand_script"
-"$setup_binary" install --hooks-binary "$hooks_binary"
+if [ "$skip_setup" = false ]; then
+  "$setup_binary" install --hooks-binary "$hooks_binary"
+fi
 
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Resources"
 cp "$app_binary" "$bundle_binary"
