@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Network
 import SwiftUI
@@ -64,6 +65,7 @@ final class ConnectionManager: ObservableObject {
     }
 
     private var reconnectTask: Task<Void, Never>?
+    private var discoveryObservation: Task<Void, Never>?
     private static let maxRecentEvents = 50
 
     // MARK: - Lifecycle
@@ -95,6 +97,8 @@ final class ConnectionManager: ObservableObject {
         discovery.stopBrowsing()
         reconnectTask?.cancel()
         reconnectTask = nil
+        discoveryObservation?.cancel()
+        discoveryObservation = nil
         savedToken = nil
         savedMacName = nil
         resolvedURL = nil
@@ -237,16 +241,15 @@ final class ConnectionManager: ObservableObject {
     }
 
     private func observeDiscoveryForAutoReconnect() {
-        // Poll discovery results to auto-connect when the paired Mac is found
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        discoveryObservation?.cancel()
+        discoveryObservation = Task { [weak self] in
+            guard let self else { return }
+            // Observe discoveredMacs changes via Combine instead of polling
+            for await macs in self.discovery.$discoveredMacs.values {
                 guard !Task.isCancelled else { return }
+                guard let macName = self.savedMacName else { continue }
 
-                guard let self, let macName = self.savedMacName else { return }
-
-                if let mac = self.discovery.discoveredMacs.first(where: { $0.name == macName }) {
+                if let mac = macs.first(where: { $0.name == macName }) {
                     Self.logger.info("Auto-reconnecting to \(macName)")
                     do {
                         let url = try await self.resolveEndpoint(mac.endpoint)
@@ -265,43 +268,46 @@ final class ConnectionManager: ObservableObject {
 
     // MARK: - Endpoint Resolution
 
+    /// Resolves a Bonjour NWEndpoint to an HTTP URL by briefly connecting to extract the IP and port.
     private func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
-        return try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { continuation in
+            var resumed = false
             let connection = NWConnection(to: endpoint, using: .tcp)
+
             connection.stateUpdateHandler = { state in
+                guard !resumed else { return }
+
                 switch state {
                 case .ready:
-                    if let path = connection.currentPath,
-                       let localEndpoint = path.remoteEndpoint {
-                        switch localEndpoint {
-                        case let .hostPort(host, port):
-                            let hostString: String
-                            switch host {
-                            case let .ipv4(addr):
-                                hostString = "\(addr)"
-                            case let .ipv6(addr):
-                                hostString = "[\(addr)]"
-                            case let .name(name, _):
-                                hostString = name
-                            @unknown default:
-                                hostString = "\(host)"
-                            }
-                            let url = URL(string: "http://\(hostString):\(port.rawValue)")!
-                            connection.cancel()
-                            continuation.resume(returning: url)
-                        default:
-                            connection.cancel()
-                            continuation.resume(throwing: PairingError.resolutionFailed)
-                        }
-                    } else {
-                        connection.cancel()
+                    defer { connection.cancel() }
+                    guard let remote = connection.currentPath?.remoteEndpoint,
+                          case let .hostPort(host, port) = remote else {
+                        resumed = true
                         continuation.resume(throwing: PairingError.resolutionFailed)
+                        return
                     }
+
+                    let hostString: String
+                    switch host {
+                    case let .ipv4(addr): hostString = "\(addr)"
+                    case let .ipv6(addr): hostString = "[\(addr)]"
+                    case let .name(name, _): hostString = name
+                    @unknown default: hostString = "\(host)"
+                    }
+
+                    guard let url = URL(string: "http://\(hostString):\(port.rawValue)") else {
+                        resumed = true
+                        continuation.resume(throwing: PairingError.resolutionFailed)
+                        return
+                    }
+                    resumed = true
+                    continuation.resume(returning: url)
+
                 case let .failed(error):
                     connection.cancel()
+                    resumed = true
                     continuation.resume(throwing: error)
-                case .cancelled:
-                    break
+
                 default:
                     break
                 }

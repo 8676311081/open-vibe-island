@@ -78,9 +78,10 @@ final class BonjourDiscovery: ObservableObject {
             let id: String
 
             switch result.endpoint {
-            case let .service(serviceName, _, _, _):
+            case let .service(serviceName, serviceType, domain, _):
                 name = serviceName
-                id = serviceName
+                // Use full service identity to avoid collisions when multiple Macs share a name
+                id = "\(serviceName).\(serviceType).\(domain ?? "local")"
             default:
                 name = "Unknown Mac"
                 id = "\(result.endpoint)"

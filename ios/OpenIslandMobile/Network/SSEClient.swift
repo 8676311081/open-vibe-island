@@ -66,20 +66,29 @@ final class SSEClient: NSObject, @unchecked Sendable {
 
     private func parseSSEBlock(_ block: String) {
         var eventType: String?
-        var dataString: String?
+        var dataLines: [String] = []
 
         for line in block.components(separatedBy: "\n") {
             if line.hasPrefix("event: ") {
                 eventType = String(line.dropFirst("event: ".count))
             } else if line.hasPrefix("data: ") {
-                dataString = String(line.dropFirst("data: ".count))
+                dataLines.append(String(line.dropFirst("data: ".count)))
+            } else if line == "data" {
+                // Bare "data" field per SSE spec = empty line in payload
+                dataLines.append("")
             } else if line.hasPrefix(":") {
                 // Comment line (keepalive), ignore
                 continue
             }
         }
 
-        guard let eventType, let dataString, let data = dataString.data(using: .utf8) else {
+        guard let eventType, !dataLines.isEmpty else {
+            return
+        }
+
+        // SSE spec: multiple data lines are joined with "\n"
+        let dataString = dataLines.joined(separator: "\n")
+        guard let data = dataString.data(using: .utf8) else {
             return
         }
 
