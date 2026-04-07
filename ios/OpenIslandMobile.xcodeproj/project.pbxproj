@@ -14,6 +14,7 @@
 		AA000005 /* SSEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000005 /* SSEClient.swift */; };
 		AA000006 /* ConnectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000006 /* ConnectionManager.swift */; };
 		AA000007 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000007 /* PairingView.swift */; };
+		AA000008 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000009 /* NotificationManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 		AB000006 /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
 		AB000007 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		AB000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AB000009 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		AC000001 /* OpenIslandMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenIslandMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -56,8 +58,17 @@
 				AE000003 /* Network */,
 				AE000004 /* Views */,
 				AE000005 /* Models */,
+				AE000007 /* Notifications */,
 			);
 			path = OpenIslandMobile;
+			sourceTree = "<group>";
+		};
+		AE000007 /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				AB000009 /* NotificationManager.swift */,
+			);
+			path = Notifications;
 			sourceTree = "<group>";
 		};
 		AE000003 /* Network */ = {
@@ -169,6 +180,7 @@
 				AA000005 /* SSEClient.swift in Sources */,
 				AA000006 /* ConnectionManager.swift in Sources */,
 				AA000007 /* PairingView.swift in Sources */,
+				AA000008 /* NotificationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
