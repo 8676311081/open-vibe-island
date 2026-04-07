@@ -169,6 +169,9 @@ final class AppModel {
     private let bridgeClient = LocalBridgeClient()
 
     @ObservationIgnored
+    let watchRelay = WatchNotificationRelay()
+
+    @ObservationIgnored
     private let terminalJumpAction: @Sendable (JumpTarget) throws -> String
 
 
@@ -441,6 +444,8 @@ final class AppModel {
 
         do {
             try bridgeServer.start()
+            setupWatchRelay()
+            watchRelay.start()
             let stream = try bridgeClient.connect()
 
             Task { [weak self] in
@@ -734,6 +739,36 @@ final class AppModel {
         }
     }
 
+    private func setupWatchRelay() {
+        watchRelay.onResolvePermission = { [weak self] sessionID, approved in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.send(
+                    .resolvePermission(sessionID: sessionID, resolution: self.permissionResolution(for: approved)),
+                    userMessage: approved
+                        ? "Watch approved permission for session \(sessionID)."
+                        : "Watch denied permission for session \(sessionID)."
+                )
+            }
+        }
+
+        watchRelay.onAnswerQuestion = { [weak self] sessionID, answer in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.send(
+                    .answerQuestion(sessionID: sessionID, response: QuestionPromptResponse(answer: answer)),
+                    userMessage: "Watch answered question for session \(sessionID): \(answer)"
+                )
+            }
+        }
+
+        watchRelay.endpoint.activeSessionCountProvider = { [weak self] in
+            DispatchQueue.main.sync { [weak self] in
+                self?.state.sessions.count ?? 0
+            }
+        }
+    }
+
     private func permissionResolution(for approved: Bool) -> PermissionResolution {
         if approved {
             return .allowOnce()
@@ -768,6 +803,12 @@ final class AppModel {
         }
 
         state.apply(event)
+
+        // Notify Watch relay for events that need push notification
+        let relaySessionID = event.extractSessionID()
+        let sessionForRelay = state.session(id: relaySessionID)
+        watchRelay.notifyEvent(event, session: sessionForRelay)
+
         reconcileIslandSurfaceAfterStateChange()
         if ingress == .bridge {
             monitoring.markSessionAttached(for: event)
