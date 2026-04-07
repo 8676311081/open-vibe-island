@@ -53,8 +53,10 @@ final class ConnectionManager: ObservableObject {
     // MARK: - Internal State
 
     let discovery = BonjourDiscovery()
+    var notificationManager: NotificationManager?
     private var sseClient: SSEClient?
     private var resolvedURL: URL?
+    private var resolutionObservation: Task<Void, Never>?
     private var savedToken: String? {
         get { UserDefaults.standard.string(forKey: "openisland.token") }
         set { UserDefaults.standard.set(newValue, forKey: "openisland.token") }
@@ -74,6 +76,23 @@ final class ConnectionManager: ObservableObject {
         // If we have a saved token but no connection, we'll try to reconnect when discovering
         if savedToken != nil {
             connectedMacName = savedMacName
+        }
+
+        // Observe notification action relay for resolution posting
+        observeNotificationActions()
+    }
+
+    private func observeNotificationActions() {
+        resolutionObservation = Task { [weak self] in
+            let relay = NotificationActionRelay.shared
+            for await resolution in relay.$pendingResolution.values {
+                guard !Task.isCancelled, let resolution else { continue }
+                do {
+                    try await self?.postResolution(requestID: resolution.requestID, action: resolution.action)
+                } catch {
+                    Self.logger.error("Failed to post resolution from notification: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -99,6 +118,8 @@ final class ConnectionManager: ObservableObject {
         reconnectTask = nil
         discoveryObservation?.cancel()
         discoveryObservation = nil
+        resolutionObservation?.cancel()
+        resolutionObservation = nil
         savedToken = nil
         savedMacName = nil
         resolvedURL = nil
@@ -178,6 +199,7 @@ final class ConnectionManager: ObservableObject {
         case "permissionRequested":
             if let e = try? decoder.decode(WatchPermissionEvent.self, from: data) {
                 event = .from(e)
+                notificationManager?.sendPermissionNotification(e)
                 Self.logger.info("Permission requested: \(e.title)")
             } else {
                 event = nil
@@ -186,6 +208,7 @@ final class ConnectionManager: ObservableObject {
         case "questionAsked":
             if let e = try? decoder.decode(WatchQuestionEvent.self, from: data) {
                 event = .from(e)
+                notificationManager?.sendQuestionNotification(e)
                 Self.logger.info("Question asked: \(e.title)")
             } else {
                 event = nil
@@ -194,6 +217,7 @@ final class ConnectionManager: ObservableObject {
         case "sessionCompleted":
             if let e = try? decoder.decode(WatchCompletionEvent.self, from: data) {
                 event = .from(e)
+                notificationManager?.sendCompletionNotification(e)
                 Self.logger.info("Session completed: \(e.summary)")
             } else {
                 event = nil
