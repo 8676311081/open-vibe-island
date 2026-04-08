@@ -12,6 +12,8 @@ Thank you for your interest in contributing to Open Island!
 
 We welcome all good ideas. If you have the will, you can turn any idea into code for this project and have it used by others.
 
+Check the [Roadmap](docs/roadmap.md) to see where the project is heading and pick an area that interests you.
+
 All code in this project is produced by AI. You should not contribute human-written code either.
 
 ### Getting Started

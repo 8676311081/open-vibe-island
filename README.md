@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/Octane0411/open-vibe-island/releases">Releases</a> ·
   <a href="#quick-start">Quick Start</a> ·
+  <a href="docs/roadmap.md">Roadmap</a> ·
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -32,6 +33,8 @@ This section is written for humans.
 
 An open-source [Vibe Island](https://vibeisland.app/) alternative for heavy code-agent users on macOS. Currently supports **Claude Code**, **Codex**, **OpenCode**, **Qoder**, **Factory**, and **CodeBuddy**, with terminal integration for **Terminal.app**, **Ghostty**, **cmux**, **Kaku**, **WezTerm**, and **iTerm2**, plus fallback detection for Warp.
 
+This is a community project. We provide the basics: code agent communication, a mac island app shell, and some fundamental features. We welcome anyone to build on top of this and turn ideas into real features for everyone. Read the [Roadmap](docs/roadmap.md) and [Contributing](CONTRIBUTING.md) docs for more info.
+
 <p align="center">
   <img src="docs/images/screenshot-overview.png" alt="Open Island screenshot" width="720">
 </p>
@@ -46,14 +49,13 @@ I do not want to run a closed-source paid app on my own computer just to monitor
 
 - Download an early build from [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases), or build from source.
 - Fork this repository and vibe your own version.
-- If you hit a bug or a usage problem, open an issue. Those get the highest priority.
-- If you want support for another terminal app or coding agent, open an issue first. We will expand where practical.
-- If you have a product idea or feature request, open an issue first. A follow-up PR with a demo is welcome.
+- If you hit a bug or a usage problem, open an issue or report it in the WeChat group — we'll do our best to address it.
+- If you have a good idea, open an issue or discuss it in the WeChat group, or directly submit a PR with a demo and feature description — we welcome any product suggestions and ideas.
 
 ### Community
 
 The project is still at an early stage — you may encounter issues along the way. Join the WeChat group or Discord for faster feedback and higher resolution priority.
-Issues and pull requests are always welcome. We are also looking for additional maintainers — Open Island is just the beginning. Come join us:
+We welcome any issues and pull requests. We are also looking for others to join as maintainers. WeChat group:
 
 <img src="docs/images/wechat-group.jpg" alt="Open Island WeChat group QR code" width="360">
 
