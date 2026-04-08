@@ -41,6 +41,11 @@ public final class BridgeServer: @unchecked Sendable {
         let kind: Kind
     }
 
+    private struct PendingCursorInteraction {
+        let clientID: UUID
+        let payload: CursorHookPayload
+    }
+
     private let socketURL: URL
     private let queue = DispatchQueue(label: "app.openisland.bridge.server")
     private let queueKey = DispatchSpecificKey<Void>()
@@ -52,6 +57,7 @@ public final class BridgeServer: @unchecked Sendable {
     private var pendingClaudeToolContexts: [String: PendingClaudeToolContext] = [:]
     private var pendingClaudeInteractions: [String: PendingClaudeInteraction] = [:]
     private var pendingOpenCodeInteractions: [String: PendingOpenCodeInteraction] = [:]
+    private var pendingCursorInteractions: [String: PendingCursorInteraction] = [:]
     /// Caches Agent tool description from preToolUse for use by the next subagentStart.
     private var pendingAgentDescriptions: [String: String] = [:]
     /// Maps toolUseID → temporary task ID for TaskCreate, so postToolUse can update with real ID.
@@ -161,6 +167,7 @@ public final class BridgeServer: @unchecked Sendable {
         pendingClaudeInteractions.removeAll()
         pendingClaudeToolContexts.removeAll()
         pendingOpenCodeInteractions.removeAll()
+        pendingCursorInteractions.removeAll()
 
         let activeConnections = Array(clients.values)
         activeConnections.forEach { $0.readSource.cancel() }
@@ -319,6 +326,45 @@ public final class BridgeServer: @unchecked Sendable {
 
             if pendingOpenCodeInteractions[sessionID] != nil {
                 resolvePendingOpenCodeInteraction(sessionID: sessionID, resolution: resolution)
+                send(.response(.acknowledged), to: clientID)
+                return
+            }
+
+            if let interaction = pendingCursorInteractions.removeValue(forKey: sessionID) {
+                let directive: CursorHookDirective
+                let summary: String
+                let phase: SessionPhase
+                switch resolution {
+                case .allowOnce:
+                    directive = CursorHookDirective(continue: true, permission: .allow)
+                    summary = "Permission approved."
+                    phase = .running
+                case let .deny(message, _):
+                    directive = CursorHookDirective(continue: true, permission: .deny, agentMessage: message)
+                    summary = message ?? "Permission denied in Open Island."
+                    phase = .completed
+                }
+
+                emit(
+                    phase == .completed
+                        ? .sessionCompleted(
+                            SessionCompleted(
+                                sessionID: sessionID,
+                                summary: summary,
+                                timestamp: .now
+                            )
+                        )
+                        : .activityUpdated(
+                            SessionActivityUpdated(
+                                sessionID: sessionID,
+                                summary: summary,
+                                phase: phase,
+                                timestamp: .now
+                            )
+                        )
+                )
+
+                send(.response(.cursorHookDirective(directive)), to: interaction.clientID)
                 send(.response(.acknowledged), to: clientID)
                 return
             }
@@ -1045,8 +1091,214 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
-    private func handleCursorHook(_: CursorHookPayload, from clientID: UUID) {
-        send(.response(.acknowledged), to: clientID)
+    private func handleCursorHook(_ payload: CursorHookPayload, from clientID: UUID) {
+        switch payload.hookEventName {
+        case .beforeSubmitPrompt:
+            clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.promptPreview.map { "Prompt: \($0)" } ?? payload.implicitStartSummary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .beforeShellExecution:
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+
+            emit(
+                .permissionRequested(
+                    PermissionRequested(
+                        sessionID: payload.sessionID,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.permissionAffectedPath,
+                            primaryActionTitle: "Allow",
+                            secondaryActionTitle: "Deny",
+                            toolName: "shell"
+                        ),
+                        timestamp: .now
+                    )
+                )
+            )
+
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
+
+        case .beforeMCPExecution:
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+
+            emit(
+                .permissionRequested(
+                    PermissionRequested(
+                        sessionID: payload.sessionID,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.permissionAffectedPath,
+                            primaryActionTitle: "Allow",
+                            secondaryActionTitle: "Deny",
+                            toolName: payload.toolName
+                        ),
+                        timestamp: .now
+                    )
+                )
+            )
+
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
+
+        case .beforeReadFile:
+            clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+            let summary = payload.filePath.map { "Reading \($0)" } ?? "Reading a file"
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .afterFileEdit:
+            clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+            let summary = payload.filePath.map { "Edited \($0)" } ?? "Cursor edited a file"
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .stop:
+            clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
+            ensureCursorSessionExists(for: payload)
+            synchronizeCursorJumpTarget(for: payload)
+            synchronizeCursorMetadata(for: payload)
+            let stopSummary: String
+            switch payload.status {
+            case "error":
+                stopSummary = "Cursor encountered an error."
+            case "aborted":
+                stopSummary = "Cursor task was aborted."
+            default:
+                stopSummary = "Cursor completed the turn."
+            }
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: stopSummary,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+        }
+    }
+
+    private func clearStaleCursorInteractionIfNeeded(for sessionID: String) {
+        guard pendingCursorInteractions.removeValue(forKey: sessionID) != nil else {
+            return
+        }
+
+        emit(
+            .actionableStateResolved(
+                ActionableStateResolved(
+                    sessionID: sessionID,
+                    summary: "Approval was handled outside Open Island.",
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func ensureCursorSessionExists(for payload: CursorHookPayload) {
+        guard !hasSession(id: payload.sessionID) else {
+            return
+        }
+
+        emit(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .cursor,
+                    origin: .live,
+                    initialPhase: .running,
+                    summary: payload.implicitStartSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget,
+                    cursorMetadata: payload.defaultCursorMetadata.isEmpty ? nil : payload.defaultCursorMetadata
+                )
+            )
+        )
+    }
+
+    private func synchronizeCursorJumpTarget(for payload: CursorHookPayload) {
+        let newTarget = payload.defaultJumpTarget
+        guard let existing = localState.session(id: payload.sessionID)?.jumpTarget,
+              existing != newTarget else {
+            return
+        }
+
+        emit(
+            .jumpTargetUpdated(
+                JumpTargetUpdated(
+                    sessionID: payload.sessionID,
+                    jumpTarget: newTarget,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func synchronizeCursorMetadata(for payload: CursorHookPayload) {
+        let newMetadata = payload.defaultCursorMetadata
+        guard let existing = localState.session(id: payload.sessionID)?.cursorMetadata,
+              existing != newMetadata else {
+            return
+        }
+
+        emit(
+            .cursorSessionMetadataUpdated(
+                CursorSessionMetadataUpdated(
+                    sessionID: payload.sessionID,
+                    cursorMetadata: newMetadata,
+                    timestamp: .now
+                )
+            )
+        )
     }
 
     private func clearStaleOpenCodeInteractionIfNeeded(for sessionID: String) {
@@ -2024,6 +2276,24 @@ public final class BridgeServer: @unchecked Sendable {
                     ActionableStateResolved(
                         sessionID: sessionID,
                         summary: "Plugin process disconnected.",
+                        timestamp: .now
+                    )
+                )
+            )
+        }
+
+        let pendingCursorSessionIDs = pendingCursorInteractions.compactMap { entry -> String? in
+            let (sessionID, pendingInteraction) = entry
+            return pendingInteraction.clientID == clientID ? sessionID : nil
+        }
+
+        for sessionID in pendingCursorSessionIDs {
+            pendingCursorInteractions.removeValue(forKey: sessionID)
+            emit(
+                .actionableStateResolved(
+                    ActionableStateResolved(
+                        sessionID: sessionID,
+                        summary: "Hook process disconnected.",
                         timestamp: .now
                     )
                 )
