@@ -54,6 +54,8 @@ public final class BridgeServer: @unchecked Sendable {
     private var pendingOpenCodeInteractions: [String: PendingOpenCodeInteraction] = [:]
     /// Caches Agent tool description from preToolUse for use by the next subagentStart.
     private var pendingAgentDescriptions: [String: String] = [:]
+    /// Maps toolUseID → temporary task ID for TaskCreate, so postToolUse can update with real ID.
+    private var pendingTaskCreations: [String: String] = [:]
     private var stateSnapshot = SessionState()
     /// Local working state: tracks sessions emitted by this server between
     /// snapshot pushes from AppModel. This is NOT a duplicate of AppModel's
@@ -552,11 +554,17 @@ public final class BridgeServer: @unchecked Sendable {
                 pendingAgentDescriptions[payload.sessionID] = desc
             }
 
-            // Capture task creation/updates from TaskCreate, TaskUpdate, TaskOutput tools
+            // Capture task creation/updates from TaskCreate, TaskUpdate tools
             if let toolName = payload.toolName,
-               (toolName == "TaskCreate" || toolName == "TaskUpdate"),
                case let .object(obj) = payload.toolInput {
-                updateTask(from: obj, toolName: toolName, sessionID: payload.sessionID)
+                if toolName == "TaskCreate" {
+                    let tempID = updateTask(from: obj, toolName: toolName, sessionID: payload.sessionID)
+                    if let tempID, let toolUseID = payload.toolUseID {
+                        pendingTaskCreations[toolUseID] = tempID
+                    }
+                } else if toolName == "TaskUpdate" {
+                    _ = updateTask(from: obj, toolName: toolName, sessionID: payload.sessionID)
+                }
             }
 
             let summary = payload.toolName.map { "Running \($0)" } ?? "Running Claude tool"
@@ -624,6 +632,17 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
             pendingClaudeToolContexts.removeValue(forKey: payload.permissionCorrelationKey)
+
+            // After TaskCreate completes, update the temporary ID with the real task_id from the response
+            if payload.toolName == "TaskCreate",
+               let toolUseID = payload.toolUseID,
+               let tempID = pendingTaskCreations.removeValue(forKey: toolUseID) {
+                replaceTaskID(
+                    sessionID: payload.sessionID,
+                    tempID: tempID,
+                    response: payload.toolResponse
+                )
+            }
 
             let summary = {
                 if payload.toolName == "AskUserQuestion" {
@@ -1534,24 +1553,33 @@ public final class BridgeServer: @unchecked Sendable {
         )
     }
 
+    /// Returns the temporary task ID if a task was created, nil otherwise.
+    @discardableResult
     private func updateTask(
         from input: [String: ClaudeHookJSONValue],
         toolName: String,
         sessionID: String
-    ) {
+    ) -> String? {
         guard var metadata = localState.session(id: sessionID)?.claudeMetadata else {
-            return
+            return nil
         }
 
+        var createdID: String?
+
         if toolName == "TaskCreate" {
-            guard case let .string(title) = input["subject"] ?? input["description"] else { return }
+            guard case let .string(title) = input["subject"] ?? input["description"] else { return nil }
             let id = (input["id"]).flatMap { if case let .string(s) = $0 { s } else { nil } }
                 ?? UUID().uuidString
             let statusStr = (input["status"]).flatMap { if case let .string(s) = $0 { s } else { nil } }
             let status = statusStr.flatMap { ClaudeTaskInfo.Status(rawValue: $0) } ?? .pending
             metadata.activeTasks.append(ClaudeTaskInfo(id: id, title: title, status: status))
+            createdID = id
         } else if toolName == "TaskUpdate" {
-            guard case let .string(taskId) = input["id"] else { return }
+            // Claude Code sends "task_id" in TaskUpdate input; also check "id" for compatibility
+            let taskId: String? = (input["task_id"] ?? input["id"]).flatMap {
+                if case let .string(s) = $0 { s } else { nil }
+            }
+            guard let taskId else { return nil }
             if let idx = metadata.activeTasks.firstIndex(where: { $0.id == taskId }) {
                 if let statusStr = (input["status"]).flatMap({ if case let .string(s) = $0 { s } else { nil } }),
                    let status = ClaudeTaskInfo.Status(rawValue: statusStr) {
@@ -1560,6 +1588,50 @@ public final class BridgeServer: @unchecked Sendable {
             }
         }
 
+        emit(
+            .claudeSessionMetadataUpdated(
+                ClaudeSessionMetadataUpdated(
+                    sessionID: sessionID,
+                    claudeMetadata: metadata,
+                    timestamp: .now
+                )
+            )
+        )
+
+        return createdID
+    }
+
+    /// Replace a temporary task ID with the real ID from the TaskCreate tool response.
+    private func replaceTaskID(
+        sessionID: String,
+        tempID: String,
+        response: ClaudeHookJSONValue?
+    ) {
+        guard var metadata = localState.session(id: sessionID)?.claudeMetadata,
+              let idx = metadata.activeTasks.firstIndex(where: { $0.id == tempID }) else {
+            return
+        }
+
+        // Try to extract the real task ID from the tool response
+        let realID: String? = {
+            switch response {
+            case let .object(obj):
+                // Try common field names: "task_id", "id"
+                return (obj["task_id"] ?? obj["id"]).flatMap {
+                    if case let .string(s) = $0 { s } else { nil }
+                }
+            case let .string(s):
+                // Response might be a plain task ID string
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            default:
+                return nil
+            }
+        }()
+
+        guard let realID, !realID.isEmpty else { return }
+
+        metadata.activeTasks[idx].id = realID
         emit(
             .claudeSessionMetadataUpdated(
                 ClaudeSessionMetadataUpdated(
