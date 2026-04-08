@@ -117,6 +117,10 @@ struct IslandPanelView: View {
         model.notchStatus == .opened
     }
 
+    private var usesOpenedVisualState: Bool {
+        isOpened || model.isOverlayCloseTransitionPending
+    }
+
     private var isPopping: Bool {
         model.notchStatus == .popping
     }
@@ -209,27 +213,27 @@ struct IslandPanelView: View {
 
     @ViewBuilder
     private func notchContent(availableSize: CGSize) -> some View {
-        let panelShadowHorizontalInset = isOpened
+        let panelShadowHorizontalInset = usesOpenedVisualState
             ? IslandChromeMetrics.openedShadowHorizontalInset
             : IslandChromeMetrics.closedShadowHorizontalInset
-        let panelShadowBottomInset = isOpened
+        let panelShadowBottomInset = usesOpenedVisualState
             ? IslandChromeMetrics.openedShadowBottomInset
             : IslandChromeMetrics.closedShadowBottomInset
         let layoutWidth = max(0, availableSize.width - (panelShadowHorizontalInset * 2))
         let layoutHeight = max(0, availableSize.height - panelShadowBottomInset)
-        let outerHorizontalPadding: CGFloat = isOpened ? 28 : 0
-        let outerBottomPadding: CGFloat = isOpened ? 14 : 0
+        let outerHorizontalPadding: CGFloat = usesOpenedVisualState ? 28 : 0
+        let outerBottomPadding: CGFloat = usesOpenedVisualState ? 14 : 0
         let openedWidth = max(0, layoutWidth - outerHorizontalPadding)
         let closedWidth = layoutWidth
-        let currentWidth = isOpened ? openedWidth : closedWidth
-        let currentHeight = isOpened ? max(closedNotchHeight, layoutHeight - outerBottomPadding) : layoutHeight
-        let horizontalInset = isOpened ? 14.0 : 0.0
-        let bottomInset = isOpened ? 14.0 : 0.0
+        let currentWidth = usesOpenedVisualState ? openedWidth : closedWidth
+        let currentHeight = usesOpenedVisualState ? max(closedNotchHeight, layoutHeight - outerBottomPadding) : layoutHeight
+        let horizontalInset = usesOpenedVisualState ? 14.0 : 0.0
+        let bottomInset = usesOpenedVisualState ? 14.0 : 0.0
         let surfaceWidth = currentWidth + (horizontalInset * 2)
         let surfaceHeight = currentHeight + bottomInset
         let surfaceShape = NotchShape(
-            topCornerRadius: isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius,
-            bottomCornerRadius: isOpened ? NotchShape.openedBottomRadius : NotchShape.closedBottomRadius
+            topCornerRadius: usesOpenedVisualState ? NotchShape.openedTopRadius : NotchShape.closedTopRadius,
+            bottomCornerRadius: usesOpenedVisualState ? NotchShape.openedBottomRadius : NotchShape.closedBottomRadius
         )
 
         ZStack(alignment: .top) {
@@ -243,8 +247,8 @@ struct IslandPanelView: View {
 
                 openedContent
                     .frame(width: openedWidth - 24)
-                    .frame(maxHeight: isOpened ? currentHeight - closedNotchHeight - 12 : 0, alignment: .top)
-                    .opacity(isOpened ? 1 : 0)
+                    .frame(maxHeight: usesOpenedVisualState ? currentHeight - closedNotchHeight - 12 : 0, alignment: .top)
+                    .opacity(usesOpenedVisualState ? 1 : 0)
                     .clipped()
             }
             .frame(width: currentWidth, height: currentHeight, alignment: .top)
@@ -256,15 +260,15 @@ struct IslandPanelView: View {
                 Rectangle()
                     .fill(Color.black)
                     .frame(height: 1)
-                    .padding(.horizontal, isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius)
+                    .padding(.horizontal, usesOpenedVisualState ? NotchShape.openedTopRadius : NotchShape.closedTopRadius)
             }
             .overlay {
                 surfaceShape
-                    .stroke(Color.white.opacity(isOpened ? 0.07 : 0.04), lineWidth: 1)
+                    .stroke(Color.white.opacity(usesOpenedVisualState ? 0.07 : 0.04), lineWidth: 1)
             }
         }
         .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
-        .scaleEffect(isOpened ? 1 : (isHovering ? IslandChromeMetrics.closedHoverScale : 1), anchor: .top)
+        .scaleEffect(usesOpenedVisualState ? 1 : (isHovering ? IslandChromeMetrics.closedHoverScale : 1), anchor: .top)
         .padding(.horizontal, panelShadowHorizontalInset)
         .padding(.bottom, panelShadowBottomInset)
         .animation(isOpened ? openAnimation : closeAnimation, value: model.notchStatus)
@@ -297,7 +301,7 @@ struct IslandPanelView: View {
 
     @ViewBuilder
     private var headerRow: some View {
-        if isOpened {
+        if usesOpenedVisualState {
             openedHeaderContent
                 .frame(height: closedNotchHeight)
         } else {

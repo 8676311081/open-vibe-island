@@ -57,6 +57,9 @@ final class OverlayUICoordinator {
     @ObservationIgnored
     private var autoCollapseSurfaceHasBeenEntered = false
 
+    @ObservationIgnored
+    private(set) var isCloseTransitionPending = false
+
     private var activeIslandCardSession: AgentSession? {
         activeIslandCardSessionAccessor?()
     }
@@ -158,6 +161,7 @@ final class OverlayUICoordinator {
 
         switch status {
         case .opened:
+            isCloseTransitionPending = false
             // State change first so panelFrame() reads the correct notchStatus
             // when computing the opened size.  SwiftUI coalesces renders within
             // a single runloop pass, so the view won't draw until after the
@@ -176,6 +180,8 @@ final class OverlayUICoordinator {
             onPlacementResolved?()
 
         case .closed, .popping:
+            let wasOpened = notchStatus == .opened
+            isCloseTransitionPending = wasOpened
             // State change FIRST so SwiftUI starts the close animation inside
             // the still-large panel.  Shrink the panel after the animation.
             islandSurface = surface
@@ -188,6 +194,7 @@ final class OverlayUICoordinator {
                 guard let self else { return }
                 // Only shrink if no newer transition superseded this one.
                 guard self.overlayTransitionGeneration == capturedGeneration else { return }
+                self.isCloseTransitionPending = false
                 self.refreshOverlayPlacement()
                 onPlacementResolved?()
             }
@@ -397,6 +404,7 @@ final class OverlayUICoordinator {
         notificationAutoCollapseTask?.cancel()
         notificationAutoCollapseTask = nil
         autoCollapseSurfaceHasBeenEntered = false
+        isCloseTransitionPending = false
 
         islandSurface = snapshot.islandSurface
         notchStatus = snapshot.notchStatus
