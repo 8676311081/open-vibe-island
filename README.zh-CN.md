@@ -33,6 +33,8 @@
 
 这是一个开源的 [Vibe Island](https://vibeisland.app/) 替代品，面向 macOS 上的重度 code agent 用户。目前支持 **Claude Code**、**Codex**、**OpenCode**、**Qoder**、**Factory** 和 **CodeBuddy**，终端集成覆盖 **Terminal.app**、**Ghostty**、**cmux**、**Kaku**、**WezTerm** 和 **iTerm2**，并对 Warp 提供降级检测支持。
 
+这是一个社区项目，我们提供了基础的 code agent 通信、一个 mac island app 壳子以及一些基础功能，我们欢迎任何人在此基础上提出自己的 idea 并且变成真实功能给更多人使用。阅读[路线图](docs/roadmap.zh-CN.md)和 [Contributing](CONTRIBUTING.zh-CN.md) 文档来获取更多信息。
+
 <p align="center">
   <img src="docs/images/screenshot-overview.png" alt="Open Island 截图" width="720">
 </p>
@@ -47,15 +49,14 @@
 
 - 从 [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases) 下载早期版本并安装，或从源码构建。
 - Fork 这个仓库，然后 vibe 你自己的版本。
-- 如果你遇到 bug 或使用问题，请先发 issue，我们会优先处理。
-- 如果你希望支持其他 terminal app 或 code agent，请先发 issue，我们会尽可能扩展。
-- 如果你有产品想法或功能需求，也请先发 issue；欢迎附 demo 发 PR。
+- 如果你遇到 bug 或使用问题，请优先提 issue，或者在微信群中报告，我们会尽可能的处理。
+- 如果你有好的想法，请优先提issue，或者在微信群中讨论，我们欢迎任何产品建议和想法
 
 ### 社区
 
 目前项目还在早期阶段，在体验中可能会出现任何问题，加入微信群/discord以获得更快的反馈和更高的解决优先级
 
-同时欢迎任意 issue 和 pull request，我们也在寻找其他maintainer，open island只是个开始，微信群：
+我们欢迎任何 issue 和 pull request，同时我们也在寻找其他人加入成为maintainer，微信群：
 
 <img src="docs/images/wechat-group.jpg" alt="Open Island 微信群二维码" width="360">
 
