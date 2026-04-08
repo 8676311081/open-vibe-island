@@ -137,18 +137,23 @@ public enum ClaudePermissionUpdate: Equatable, Codable, Sendable {
     }
 
     /// Human-readable label for rendering as a button in the approval card.
+    /// Matches Claude Code's actual option text as closely as possible.
     public var displayLabel: String {
         switch self {
-        case let .addRules(_, rules, behavior):
-            let toolNames = rules.map(\.toolName).joined(separator: ", ")
-            let verb = behavior == .allow ? "Always Allow" : "Always Deny"
-            return toolNames.isEmpty ? verb : "\(verb) \(toolNames)"
+        case let .addRules(_, rules, _):
+            let detail = rules.compactMap { rule -> String? in
+                if let content = rule.ruleContent, !content.isEmpty {
+                    return content
+                }
+                return rule.toolName
+            }.joined(separator: ", ")
+            return detail.isEmpty ? "Yes, and don't ask again" : "Yes, and don't ask again: \(detail)"
         case let .setMode(_, mode):
             switch mode {
             case .acceptEdits:
-                return "Auto-accept Edits"
+                return "Yes, manually approve edits"
             case .bypassPermissions, .dontAsk:
-                return "Bypass Permissions"
+                return "Yes, and bypass permissions"
             case .plan:
                 return "Plan Mode"
             case .default:

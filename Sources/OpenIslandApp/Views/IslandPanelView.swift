@@ -530,7 +530,7 @@ struct IslandPanelView: View {
                     IslandSessionRow(
                         session: session,
                         referenceDate: context.date,
-                        isActionable: session.id == actionableSessionID,
+                        isActionable: session.phase.requiresAttention || session.id == actionableSessionID,
                         useDrawingGroup: model.notchStatus == .opened,
                         isInteractive: model.notchStatus == .opened,
                         lang: model.lang,
@@ -1199,14 +1199,14 @@ private struct IslandSessionRow: View {
             )
 
             HStack(spacing: 8) {
-                Button(lang.t("approval.deny")) { onApprove?(.deny) }
+                Button("No") { onApprove?(.deny) }
                     .buttonStyle(IslandWideButtonStyle(kind: .secondary))
-                Button(lang.t("approval.allowOnce")) { onApprove?(.allowOnce) }
+                Button("Yes") { onApprove?(.allowOnce) }
                     .buttonStyle(IslandWideButtonStyle(kind: .warning))
 
                 let updates = session.permissionRequest?.suggestedUpdates ?? []
                 if updates.isEmpty {
-                    Button(lang.t("approval.alwaysAllow")) { onApprove?(.allowWithUpdates([])) }
+                    Button("Always Allow") { onApprove?(.allowWithUpdates([])) }
                         .buttonStyle(IslandWideButtonStyle(kind: .danger))
                 } else {
                     ForEach(Array(updates.enumerated()), id: \.offset) { _, update in

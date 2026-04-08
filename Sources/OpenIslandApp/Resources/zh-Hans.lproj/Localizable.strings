@@ -97,10 +97,6 @@
 "island.collapseList" = "收起列表";
 "island.usageWaiting" = "等待用量数据";
 
-/* Island Panel - Approval */
-"approval.deny" = "拒绝";
-"approval.allowOnce" = "允许一次";
-"approval.alwaysAllow" = "始终允许";
 
 /* Island Panel - Subagents & Tasks */
 "subagents.title" = "子代理 (%lld)";

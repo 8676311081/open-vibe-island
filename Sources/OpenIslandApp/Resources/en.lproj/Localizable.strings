@@ -97,10 +97,6 @@
 "island.collapseList" = "Collapse list";
 "island.usageWaiting" = "Usage waiting";
 
-/* Island Panel - Approval */
-"approval.deny" = "Deny";
-"approval.allowOnce" = "Allow Once";
-"approval.alwaysAllow" = "Always Allow";
 
 /* Island Panel - Subagents & Tasks */
 "subagents.title" = "Subagents (%lld)";
