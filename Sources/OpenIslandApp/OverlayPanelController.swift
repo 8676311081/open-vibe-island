@@ -151,29 +151,14 @@ final class OverlayPanelController {
 
         let windowFrame = panelFrame(for: model, on: screen)
 
-        // Skip frame update entirely when the panel is already at the target
-        // frame — avoids unnecessary AppKit animation context overhead during
-        // periodic reconciliation cycles.
-        let needsFrameUpdate = panel.frame != windowFrame
-        if needsFrameUpdate {
-            if animated {
-                let status = model?.notchStatus
-                NSAnimationContext.runAnimationGroup { context in
-                    switch status {
-                    case .opened:
-                        context.duration = 0.30
-                    case .closed, .popping:
-                        context.duration = 0.25
-                    case nil:
-                        context.duration = 0
-                    }
-                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
-                    context.allowsImplicitAnimation = true
-                    panel.animator().setFrame(windowFrame, display: true)
-                }
-            } else {
-                panel.setFrame(windowFrame, display: true)
-            }
+        // Always set the panel frame instantly — no AppKit animation.
+        // All visual transitions (shape, size, opacity, corner radius) are
+        // driven by SwiftUI's .animation() modifier on the content view.
+        // Mixing NSAnimationContext with SwiftUI spring animations caused
+        // visible jank because the two systems have different timing curves,
+        // durations, and start times (AppKit was deferred by one runloop).
+        if panel.frame != windowFrame {
+            panel.setFrame(windowFrame, display: true)
         }
         computeNotchRect(screen: screen)
 
