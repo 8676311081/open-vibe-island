@@ -83,6 +83,12 @@ public final class BridgeServer: @unchecked Sendable {
         try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: socketURL)
 
+        // Clean up legacy socket from /tmp to avoid stale file confusion.
+        let legacyURL = BridgeSocketLocation.legacyURL
+        if legacyURL != socketURL {
+            try? FileManager.default.removeItem(at: legacyURL)
+        }
+
         let listeningFileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard listeningFileDescriptor != -1 else {
             throw BridgeTransportError.systemCallFailed("socket", errno)
