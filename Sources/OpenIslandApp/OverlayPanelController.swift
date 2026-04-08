@@ -153,9 +153,9 @@ final class OverlayPanelController {
             NSAnimationContext.runAnimationGroup { context in
                 switch status {
                 case .opened:
-                    context.duration = 0.50
+                    context.duration = 0.30
                 case .closed, .popping:
-                    context.duration = 0.42
+                    context.duration = 0.25
                 case nil:
                     context.duration = 0
                 }
