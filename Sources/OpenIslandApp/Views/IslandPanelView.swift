@@ -409,12 +409,17 @@ struct IslandPanelView: View {
 
     private var openedContent: some View {
         VStack(spacing: 0) {
-            if model.shouldShowSessionBootstrapPlaceholder {
-                sessionBootstrapPlaceholder
-            } else if model.islandListSessions.isEmpty {
-                emptyState
-            } else {
-                sessionList
+            // Only compute session rows when opened. When closed, the content
+            // is invisible (opacity 0, maxHeight 0, clipped) so building the
+            // full session list is wasted work that delays the open animation.
+            if isOpened {
+                if model.shouldShowSessionBootstrapPlaceholder {
+                    sessionBootstrapPlaceholder
+                } else if model.islandListSessions.isEmpty {
+                    emptyState
+                } else {
+                    sessionList
+                }
             }
         }
         .padding(.horizontal, 18)
@@ -1243,8 +1248,8 @@ private struct IslandSessionRow: View {
                 .frame(height: 1)
 
             AutoHeightScrollView(maxHeight: 260) {
-                Markdown(completionMessageText)
-                    .markdownTheme(.completionCard)
+                CachedMarkdownView(text: completionMessageText)
+                    .equatable()
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -1668,6 +1673,21 @@ private struct AttentionIndicator: View {
         Image(systemName: "exclamationmark.triangle.fill")
             .font(.system(size: size * 0.75, weight: .bold))
             .foregroundStyle(color)
+    }
+}
+
+// MARK: - Cached Markdown (avoids re-parsing AST on every view evaluation)
+
+private struct CachedMarkdownView: View, Equatable {
+    nonisolated let text: String
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text
+    }
+
+    var body: some View {
+        Markdown(text)
+            .markdownTheme(.completionCard)
     }
 }
 

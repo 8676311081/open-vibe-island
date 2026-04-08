@@ -25,6 +25,7 @@ final class AppModel {
 
     var state = SessionState() {
         didSet {
+            guard state != oldValue else { return }
             _cachedSessionBuckets = nil
             bridgeServer.updateStateSnapshot(state)
         }
