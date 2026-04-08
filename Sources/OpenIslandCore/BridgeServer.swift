@@ -1575,8 +1575,8 @@ public final class BridgeServer: @unchecked Sendable {
             metadata.activeTasks.append(ClaudeTaskInfo(id: id, title: title, status: status))
             createdID = id
         } else if toolName == "TaskUpdate" {
-            // Claude Code sends "task_id" in TaskUpdate input; also check "id" for compatibility
-            let taskId: String? = (input["task_id"] ?? input["id"]).flatMap {
+            // Claude Code sends "taskId" (camelCase) in TaskUpdate tool_input
+            let taskId: String? = (input["taskId"] ?? input["task_id"] ?? input["id"]).flatMap {
                 if case let .string(s) = $0 { s } else { nil }
             }
             guard let taskId else { return nil }
@@ -1616,12 +1616,17 @@ public final class BridgeServer: @unchecked Sendable {
         let realID: String? = {
             switch response {
             case let .object(obj):
-                // Try common field names: "task_id", "id"
-                return (obj["task_id"] ?? obj["id"]).flatMap {
+                // Try common field names: "taskId", "task_id", "id"
+                return (obj["taskId"] ?? obj["task_id"] ?? obj["id"]).flatMap {
                     if case let .string(s) = $0 { s } else { nil }
                 }
             case let .string(s):
-                // Response might be a plain task ID string
+                // Response is often "Task #<id> created successfully: <title>"
+                // Extract the ID between "Task #" and the next space/non-alnum
+                if let idRange = s.range(of: #"(?<=Task #)\S+"#, options: .regularExpression) {
+                    return String(s[idRange])
+                }
+                // Fallback: if the response is just a plain ID
                 let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? nil : trimmed
             default:
