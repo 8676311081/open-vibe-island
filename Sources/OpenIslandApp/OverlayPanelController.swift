@@ -604,7 +604,6 @@ private final class NotchPanel: NSPanel {
 
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
     weak var notchController: OverlayPanelController?
-    private var hasDisabledScrollers = false
 
     override var isOpaque: Bool {
         false
@@ -665,13 +664,11 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
 
     override func layout() {
         super.layout()
-        // NSHostingView wraps content in an internal NSScrollView.
-        // Disable its scrollers to prevent a thick system scrollbar.
-        // Only traverse once — the internal hierarchy is stable after first layout.
-        if !hasDisabledScrollers {
-            hasDisabledScrollers = true
-            disableInternalScrollers(in: self)
-        }
+        // NSHostingView wraps content in internal NSScrollViews.
+        // SwiftUI may recreate them when the view tree changes (e.g.
+        // AutoHeightScrollView toggling between scroll/non-scroll mode),
+        // so we must re-disable on every layout pass.
+        disableInternalScrollers(in: self)
     }
 
     private func disableInternalScrollers(in view: NSView) {
