@@ -360,6 +360,22 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func closeTransitionSetsStateImmediatelyAndClearsPending() {
+        let model = AppModel()
+        model.notchStatus = .opened
+        model.notchOpenReason = .hover
+        model.islandSurface = .sessionList()
+
+        model.notchClose()
+
+        // State changes immediately; pending clears synchronously in tests
+        // (no panel → fadeOutAndClose calls completion inline).
+        #expect(model.notchStatus == .closed)
+        #expect(model.notchOpenReason == nil)
+        #expect(!model.isOverlayCloseTransitionPending)
+    }
+
+    @Test
     func clickedSessionListDoesNotAutoCollapseOnPointerExit() {
         let model = AppModel()
         model.notchStatus = .opened

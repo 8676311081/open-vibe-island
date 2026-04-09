@@ -50,6 +50,7 @@ final class AppModel {
         set { overlay.islandSurface = newValue }
     }
     var isOverlayVisible: Bool { overlay.isOverlayVisible }
+    var isOverlayCloseTransitionPending: Bool { overlay.isCloseTransitionPending }
     var isCodexSetupBusy: Bool { hooks.isCodexSetupBusy }
     var isClaudeHookSetupBusy: Bool { hooks.isClaudeHookSetupBusy }
     var isClaudeUsageSetupBusy: Bool { hooks.isClaudeUsageSetupBusy }

@@ -88,6 +88,30 @@ final class OverlayPanelController {
         }
     }
 
+    /// Fade the panel out, then call completion so the caller can snap state.
+    func fadeOutAndClose(
+        duration: TimeInterval,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard let panel else {
+            completion()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: {
+            Task { @MainActor in completion() }
+        })
+    }
+
+    /// Restore panel alpha after a fade-out close.
+    func restoreAlpha() {
+        panel?.alphaValue = 1
+    }
+
     func reposition(preferredScreenID: String?) -> OverlayPlacementDiagnostics? {
         guard let panel else {
             return placementDiagnostics(preferredScreenID: preferredScreenID)
@@ -397,18 +421,19 @@ final class OverlayPanelController {
     }
 
     private func panelShadowInsets(for model: AppModel?) -> (horizontal: CGFloat, bottom: CGFloat) {
-        switch model?.notchStatus {
-        case .opened, nil:
+        let usesOpenedInsets = model.map { $0.notchStatus == .opened || $0.isOverlayCloseTransitionPending } ?? true
+
+        if usesOpenedInsets {
             return (
                 horizontal: IslandChromeMetrics.openedShadowHorizontalInset,
                 bottom: IslandChromeMetrics.openedShadowBottomInset
             )
-        case .closed, .popping:
-            return (
-                horizontal: IslandChromeMetrics.closedShadowHorizontalInset,
-                bottom: IslandChromeMetrics.closedShadowBottomInset
-            )
         }
+
+        return (
+            horizontal: IslandChromeMetrics.closedShadowHorizontalInset,
+            bottom: IslandChromeMetrics.closedShadowBottomInset
+        )
     }
 
     private func closedPanelWidth(for model: AppModel, on screen: NSScreen) -> CGFloat {
