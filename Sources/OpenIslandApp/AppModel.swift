@@ -63,12 +63,15 @@ final class AppModel {
     var codexHooksInstalled: Bool { hooks.codexHooksInstalled }
     var claudeHooksInstalled: Bool { hooks.claudeHooksInstalled }
     var qoderHooksInstalled: Bool { hooks.qoderHooksInstalled }
+    var qwenCodeHooksInstalled: Bool { hooks.qwenCodeHooksInstalled }
     var factoryHooksInstalled: Bool { hooks.factoryHooksInstalled }
     var codebuddyHooksInstalled: Bool { hooks.codebuddyHooksInstalled }
     var qoderHookStatus: ClaudeHookInstallationStatus? { hooks.qoderHookStatus }
+    var qwenCodeHookStatus: ClaudeHookInstallationStatus? { hooks.qwenCodeHookStatus }
     var factoryHookStatus: ClaudeHookInstallationStatus? { hooks.factoryHookStatus }
     var codebuddyHookStatus: ClaudeHookInstallationStatus? { hooks.codebuddyHookStatus }
     var isQoderHookSetupBusy: Bool { hooks.isQoderHookSetupBusy }
+    var isQwenCodeHookSetupBusy: Bool { hooks.isQwenCodeHookSetupBusy }
     var isFactoryHookSetupBusy: Bool { hooks.isFactoryHookSetupBusy }
     var isCodebuddyHookSetupBusy: Bool { hooks.isCodebuddyHookSetupBusy }
     var openCodePluginInstalled: Bool { hooks.openCodePluginInstalled }
@@ -105,6 +108,8 @@ final class AppModel {
     func uninstallClaudeHooks() { hooks.uninstallClaudeHooks() }
     func installQoderHooks() { hooks.installQoderHooks() }
     func uninstallQoderHooks() { hooks.uninstallQoderHooks() }
+    func installQwenCodeHooks() { hooks.installQwenCodeHooks() }
+    func uninstallQwenCodeHooks() { hooks.uninstallQwenCodeHooks() }
     func installFactoryHooks() { hooks.installFactoryHooks() }
     func uninstallFactoryHooks() { hooks.uninstallFactoryHooks() }
     func installCodebuddyHooks() { hooks.installCodebuddyHooks() }
@@ -901,6 +906,7 @@ final class AppModel {
                 if !self.claudeHooksInstalled { self.installClaudeHooks() }
                 if !self.codexHooksInstalled { self.installCodexHooks() }
                 if !self.qoderHooksInstalled { self.installQoderHooks() }
+                if !self.qwenCodeHooksInstalled { self.installQwenCodeHooks() }
                 if !self.factoryHooksInstalled { self.installFactoryHooks() }
                 if !self.codebuddyHooksInstalled { self.installCodebuddyHooks() }
                 if !self.openCodePluginInstalled { self.installOpenCodePlugin() }

@@ -6,6 +6,7 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
     case geminiCLI
     case openCode
     case qoder
+    case qwenCode
     case factory
     case codebuddy
     case cursor
@@ -22,6 +23,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "OpenCode"
         case .qoder:
             "Qoder"
+        case .qwenCode:
+            "Qwen Code"
         case .factory:
             "Factory"
         case .codebuddy:
@@ -43,6 +46,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "OPENCODE"
         case .qoder:
             "QODER"
+        case .qwenCode:
+            "QWEN"
         case .factory:
             "FACTORY"
         case .codebuddy:
@@ -54,7 +59,7 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
 
     public var isClaudeCodeFork: Bool {
         switch self {
-        case .claudeCode, .qoder, .factory, .codebuddy:
+        case .claudeCode, .qoder, .qwenCode, .factory, .codebuddy:
             true
         default:
             false
@@ -429,7 +434,7 @@ public extension AgentSession {
     }
 
     var isTrackedLiveSession: Bool {
-        !isDemoSession && (tool == .codex || tool == .claudeCode || tool == .openCode || tool == .qoder || tool == .factory || tool == .codebuddy || tool == .cursor)
+        !isDemoSession && (tool == .codex || tool == .claudeCode || tool == .openCode || tool == .qoder || tool == .qwenCode || tool == .factory || tool == .codebuddy || tool == .cursor)
     }
 
     var isTrackedLiveCodexSession: Bool {

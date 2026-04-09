@@ -222,7 +222,7 @@ public struct SessionState: Equatable, Sendable {
         if resolution.isApproved {
             session.phase = .running
             switch session.tool {
-            case .claudeCode, .qoder, .factory, .codebuddy:
+            case .claudeCode, .qoder, .qwenCode, .factory, .codebuddy:
                 session.summary = "Permission approved. \(session.tool.displayName) continued the tool."
             case .openCode:
                 session.summary = "Permission approved. OpenCode continued the tool."
@@ -232,7 +232,7 @@ public struct SessionState: Equatable, Sendable {
         } else {
             session.phase = .completed
             switch session.tool {
-            case .claudeCode, .qoder, .factory, .codebuddy:
+            case .claudeCode, .qoder, .qwenCode, .factory, .codebuddy:
                 session.summary = "Permission denied in Open Island."
             case .openCode:
                 session.summary = "Permission denied in Open Island."

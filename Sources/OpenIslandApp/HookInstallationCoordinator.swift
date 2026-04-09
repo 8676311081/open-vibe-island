@@ -8,6 +8,7 @@ final class HookInstallationCoordinator {
     var codexHookStatus: CodexHookInstallationStatus?
     var claudeHookStatus: ClaudeHookInstallationStatus?
     var qoderHookStatus: ClaudeHookInstallationStatus?
+    var qwenCodeHookStatus: ClaudeHookInstallationStatus?
     var factoryHookStatus: ClaudeHookInstallationStatus?
     var codebuddyHookStatus: ClaudeHookInstallationStatus?
     var openCodePluginStatus: OpenCodePluginInstallationStatus?
@@ -19,6 +20,7 @@ final class HookInstallationCoordinator {
     var isCodexSetupBusy = false
     var isClaudeHookSetupBusy = false
     var isQoderHookSetupBusy = false
+    var isQwenCodeHookSetupBusy = false
     var isFactoryHookSetupBusy = false
     var isCodebuddyHookSetupBusy = false
     var isOpenCodeSetupBusy = false
@@ -38,6 +40,12 @@ final class HookInstallationCoordinator {
     private let qoderHookInstallationManager = ClaudeHookInstallationManager(
         claudeDirectory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".qoder", isDirectory: true),
         hookSource: "qoder"
+    )
+
+    @ObservationIgnored
+    private let qwenCodeHookInstallationManager = ClaudeHookInstallationManager(
+        claudeDirectory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".qwen", isDirectory: true),
+        hookSource: "qwen"
     )
 
     @ObservationIgnored
@@ -86,6 +94,10 @@ final class HookInstallationCoordinator {
 
     var qoderHooksInstalled: Bool {
         qoderHookStatus?.managedHooksPresent == true
+    }
+
+    var qwenCodeHooksInstalled: Bool {
+        qwenCodeHookStatus?.managedHooksPresent == true
     }
 
     var factoryHooksInstalled: Bool {
@@ -458,6 +470,7 @@ final class HookInstallationCoordinator {
 
     func refreshCCForkHookStatuses() {
         refreshCCForkHookStatus(manager: qoderHookInstallationManager, name: "Qoder") { [weak self] in self?.qoderHookStatus = $0 }
+        refreshCCForkHookStatus(manager: qwenCodeHookInstallationManager, name: "Qwen Code") { [weak self] in self?.qwenCodeHookStatus = $0 }
         refreshCCForkHookStatus(manager: factoryHookInstallationManager, name: "Factory") { [weak self] in self?.factoryHookStatus = $0 }
         refreshCCForkHookStatus(manager: codebuddyHookInstallationManager, name: "CodeBuddy") { [weak self] in self?.codebuddyHookStatus = $0 }
     }
@@ -528,6 +541,7 @@ final class HookInstallationCoordinator {
                 guard let self else { return }
                 for (manager, name, apply) in [
                     (self.qoderHookInstallationManager, "Qoder", { [weak self] (s: ClaudeHookInstallationStatus) in self?.qoderHookStatus = s }),
+                    (self.qwenCodeHookInstallationManager, "Qwen Code", { [weak self] (s: ClaudeHookInstallationStatus) in self?.qwenCodeHookStatus = s }),
                     (self.factoryHookInstallationManager, "Factory", { [weak self] (s: ClaudeHookInstallationStatus) in self?.factoryHookStatus = s }),
                     (self.codebuddyHookInstallationManager, "CodeBuddy", { [weak self] (s: ClaudeHookInstallationStatus) in self?.codebuddyHookStatus = s }),
                 ] {
@@ -652,6 +666,14 @@ final class HookInstallationCoordinator {
 
     func uninstallQoderHooks() {
         updateCCForkHooks(manager: qoderHookInstallationManager, name: "Qoder", isBusySetter: { [weak self] in self?.isQoderHookSetupBusy = $0 }, statusSetter: { [weak self] in self?.qoderHookStatus = $0 }, install: false)
+    }
+
+    func installQwenCodeHooks() {
+        updateCCForkHooks(manager: qwenCodeHookInstallationManager, name: "Qwen Code", isBusySetter: { [weak self] in self?.isQwenCodeHookSetupBusy = $0 }, statusSetter: { [weak self] in self?.qwenCodeHookStatus = $0 }, install: true)
+    }
+
+    func uninstallQwenCodeHooks() {
+        updateCCForkHooks(manager: qwenCodeHookInstallationManager, name: "Qwen Code", isBusySetter: { [weak self] in self?.isQwenCodeHookSetupBusy = $0 }, statusSetter: { [weak self] in self?.qwenCodeHookStatus = $0 }, install: false)
     }
 
     func installFactoryHooks() {

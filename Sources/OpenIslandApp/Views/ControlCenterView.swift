@@ -109,6 +109,8 @@ struct ControlCenterView: View {
 
                 ccForkHookCard(title: "Qoder Hooks", installed: model.qoderHooksInstalled, status: model.qoderHookStatus, isBusy: model.isQoderHookSetupBusy, install: model.installQoderHooks, uninstall: model.uninstallQoderHooks)
 
+                ccForkHookCard(title: "Qwen Code Hooks", installed: model.qwenCodeHooksInstalled, status: model.qwenCodeHookStatus, isBusy: model.isQwenCodeHookSetupBusy, install: model.installQwenCodeHooks, uninstall: model.uninstallQwenCodeHooks)
+
                 ccForkHookCard(title: "Factory Hooks", installed: model.factoryHooksInstalled, status: model.factoryHookStatus, isBusy: model.isFactoryHookSetupBusy, install: model.installFactoryHooks, uninstall: model.uninstallFactoryHooks)
 
                 ccForkHookCard(title: "CodeBuddy Hooks", installed: model.codebuddyHooksInstalled, status: model.codebuddyHookStatus, isBusy: model.isCodebuddyHookSetupBusy, install: model.installCodebuddyHooks, uninstall: model.uninstallCodebuddyHooks)

@@ -324,6 +324,7 @@ struct SetupSettingsPane: View {
     @State private var confirmingUninstallCodex = false
     @State private var confirmingUninstallOpenCode = false
     @State private var confirmingUninstallQoder = false
+    @State private var confirmingUninstallQwenCode = false
     @State private var confirmingUninstallFactory = false
     @State private var confirmingUninstallCodebuddy = false
     @State private var confirmingUninstallCursor = false
@@ -396,6 +397,22 @@ struct SetupSettingsPane: View {
                     Button(lang.t("settings.general.cancel"), role: .cancel) {}
                 } message: {
                     Text("This will remove Open Island hooks from ~/.qoder/settings.json.")
+                }
+
+                hookRow(
+                    name: "Qwen Code",
+                    installed: model.qwenCodeHooksInstalled,
+                    busy: model.isQwenCodeHookSetupBusy,
+                    installAction: { model.installQwenCodeHooks() },
+                    uninstallAction: { confirmingUninstallQwenCode = true }
+                )
+                .alert(lang.t("settings.general.uninstallConfirmTitle"), isPresented: $confirmingUninstallQwenCode) {
+                    Button(lang.t("settings.general.uninstallConfirmAction"), role: .destructive) {
+                        model.uninstallQwenCodeHooks()
+                    }
+                    Button(lang.t("settings.general.cancel"), role: .cancel) {}
+                } message: {
+                    Text("This will remove Open Island hooks from ~/.qwen/settings.json.")
                 }
 
                 hookRow(
@@ -501,6 +518,7 @@ struct SetupSettingsPane: View {
                     if !model.codexHooksInstalled { model.installCodexHooks() }
                     if !model.openCodePluginInstalled { model.installOpenCodePlugin() }
                     if !model.qoderHooksInstalled { model.installQoderHooks() }
+                    if !model.qwenCodeHooksInstalled { model.installQwenCodeHooks() }
                     if !model.factoryHooksInstalled { model.installFactoryHooks() }
                     if !model.codebuddyHooksInstalled { model.installCodebuddyHooks() }
                     if !model.cursorHooksInstalled { model.installCursorHooks() }
@@ -516,7 +534,7 @@ struct SetupSettingsPane: View {
 
     private var allReady: Bool {
         model.claudeHooksInstalled && model.codexHooksInstalled && model.openCodePluginInstalled
-            && model.qoderHooksInstalled && model.factoryHooksInstalled && model.codebuddyHooksInstalled
+            && model.qoderHooksInstalled && model.qwenCodeHooksInstalled && model.factoryHooksInstalled && model.codebuddyHooksInstalled
             && model.cursorHooksInstalled && model.claudeUsageInstalled
     }
 
