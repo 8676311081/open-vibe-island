@@ -388,19 +388,27 @@ public extension CodexHookPayload {
         withRuntimeContext(
             environment: environment,
             currentTTYProvider: { currentTTY() },
-            terminalLocatorProvider: { terminalLocator(for: $0) }
+            terminalLocatorProvider: { terminalLocator(for: $0) },
+            warpPaneResolver: { cwd in WarpSQLiteReader().lookupPaneUUID(forCwd: cwd) }
         )
     }
 
     func withRuntimeContext(
         environment: [String: String],
         currentTTYProvider: () -> String?,
-        terminalLocatorProvider: (String) -> (sessionID: String?, tty: String?, title: String?)
+        terminalLocatorProvider: (String) -> (sessionID: String?, tty: String?, title: String?),
+        warpPaneResolver: (String) -> String? = { cwd in
+            WarpSQLiteReader().lookupPaneUUID(forCwd: cwd)
+        }
     ) -> CodexHookPayload {
         var payload = self
 
         if payload.terminalApp == nil {
             payload.terminalApp = inferTerminalApp(from: environment)
+        }
+
+        if payload.terminalApp == "Warp", payload.warpPaneUUID == nil {
+            payload.warpPaneUUID = warpPaneResolver(payload.cwd)
         }
 
         // For cmux, use CMUX_SURFACE_ID as the terminal session identifier.
