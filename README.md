@@ -216,33 +216,11 @@ Repository: Octane0411/open-vibe-island
 
 ## Contributors
 
-Thanks to all our contributors!
-
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/Octane0411"><img src="https://avatars.githubusercontent.com/u/88922959?v=4?s=60" width="60px;" alt="Octane0411"/><br /><sub><b>Octane0411</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=Octane0411" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/Aubrey-M-ops"><img src="https://avatars.githubusercontent.com/u/68136572?v=4?s=60" width="60px;" alt="Aubrey-M-ops"/><br /><sub><b>Aubrey-M-ops</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=Aubrey-M-ops" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/toddwyl"><img src="https://avatars.githubusercontent.com/u/20945688?v=4?s=60" width="60px;" alt="toddwyl"/><br /><sub><b>toddwyl</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=toddwyl" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/dashan0313"><img src="https://avatars.githubusercontent.com/u/50685231?v=4?s=60" width="60px;" alt="dashan0313"/><br /><sub><b>dashan0313</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=dashan0313" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/XciD"><img src="https://avatars.githubusercontent.com/u/6586344?v=4?s=60" width="60px;" alt="XciD"/><br /><sub><b>XciD</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=XciD" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/MarkLKK"><img src="https://avatars.githubusercontent.com/u/17311581?v=4?s=60" width="60px;" alt="MarkLKK"/><br /><sub><b>MarkLKK</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=MarkLKK" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/ObiTracks"><img src="https://avatars.githubusercontent.com/u/51428134?v=4?s=60" width="60px;" alt="ObiTracks"/><br /><sub><b>ObiTracks</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=ObiTracks" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/seedoilz"><img src="https://avatars.githubusercontent.com/u/72735001?v=4?s=60" width="60px;" alt="seedoilz"/><br /><sub><b>seedoilz</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=seedoilz" title="Code">💻</a></td>
-    </tr>
-    <tr>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/fengren"><img src="https://avatars.githubusercontent.com/u/8788907?v=4?s=60" width="60px;" alt="fengren"/><br /><sub><b>fengren</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=fengren" title="Code">💻</a></td>
-      <td align="center" valign="top" width="12.5%"><a href="https://github.com/graelo"><img src="https://avatars.githubusercontent.com/u/84066822?v=4?s=60" width="60px;" alt="graelo"/><br /><sub><b>graelo</b></sub></a><br /><a href="https://github.com/Octane0411/open-vibe-island/commits?author=graelo" title="Code">💻</a></td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- ALL-CONTRIBUTORS-LIST:END -->
+<a href="https://github.com/Octane0411/open-vibe-island/graphs/contributors">
+  <!-- CONTRIBUTORS-IMG:START -->
+  <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island&t=0" />
+  <!-- CONTRIBUTORS-IMG:END -->
+</a>
 
 ---
 
