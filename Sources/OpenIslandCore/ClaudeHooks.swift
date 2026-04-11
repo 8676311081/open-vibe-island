@@ -1110,59 +1110,79 @@ public extension ClaudeHookPayload {
     }
 
     private func inferTerminalApp(from environment: [String: String]) -> String? {
-        if environment["ITERM_SESSION_ID"] != nil || environment["LC_TERMINAL"] == "iTerm2" {
-            return "iTerm"
-        }
-
+        // Multiplexers run inside a host terminal but expose their own pane
+        // context. Detect them first so the captured jumpTarget points at
+        // the multiplexer pane instead of the outer terminal.
         if environment["CMUX_WORKSPACE_ID"] != nil || environment["CMUX_SOCKET_PATH"] != nil {
             return "cmux"
         }
-
-        // Zellij runs inside another terminal; detect it before the parent
-        // terminal so we can capture pane context for jump-back.
         if environment["ZELLIJ"] != nil {
             return "Zellij"
         }
 
-        if environment["GHOSTTY_RESOURCES_DIR"] != nil {
-            return "Ghostty"
+        // TERM_PROGRAM is the only authoritative terminal signal. Each
+        // terminal sets it explicitly when it execs the user's shell, so
+        // unlike per-app env vars (GHOSTTY_RESOURCES_DIR,
+        // WARP_IS_LOCAL_SHELL_SESSION, ITERM_SESSION_ID, ...) it cannot
+        // leak across apps via macOS GUI app environment inheritance.
+        //
+        // Concrete leak this guards against: launching Warp via
+        // `open -a Warp` (or any other path) from a Ghostty tab causes
+        // Warp's main process — and every shell Warp later spawns — to
+        // inherit Ghostty's GHOSTTY_RESOURCES_DIR. The previous
+        // env-var-first ordering then tagged those Warp shells as
+        // Ghostty, which fed the wrong terminal app to terminalLocator,
+        // which queried Ghostty's `focused terminal of selected tab of
+        // front window` and stamped a foreign Ghostty pane's
+        // sessionID/cwd/title onto the Warp session's jumpTarget. The
+        // resulting liveAttachmentKey collided with the real Ghostty
+        // owner and the Warp session was deduped out of the island list.
+        if let termProgram = environment["TERM_PROGRAM"]?.lowercased(), !termProgram.isEmpty {
+            switch termProgram {
+            case "apple_terminal":
+                return "Terminal"
+            case "iterm.app", "iterm2":
+                return "iTerm"
+            case let value where value.contains("warp"):
+                return "Warp"
+            case let value where value.contains("ghostty"):
+                return "Ghostty"
+            case "kaku":
+                return "Kaku"
+            case "wezterm":
+                return "WezTerm"
+            case "vscode":
+                // Cursor also sets TERM_PROGRAM=vscode; check its unique
+                // env var first.
+                if environment["CURSOR_TRACE_ID"] != nil {
+                    return "Cursor"
+                }
+                return "VS Code"
+            case "vscode-insiders":
+                return "VS Code Insiders"
+            case "windsurf":
+                return "Windsurf"
+            case "trae":
+                return "Trae"
+            default:
+                break
+            }
         }
 
+        // Fallback for terminals that don't set TERM_PROGRAM (older builds,
+        // exotic launchers, etc.). These per-app env vars are vulnerable to
+        // the GUI inheritance leak documented above; only consult them when
+        // TERM_PROGRAM gave us nothing useful. Within this fallback, check
+        // Warp before Ghostty so a leaked GHOSTTY_RESOURCES_DIR cannot win
+        // over a real WARP_IS_LOCAL_SHELL_SESSION on the same shell.
+        if environment["ITERM_SESSION_ID"] != nil || environment["LC_TERMINAL"] == "iTerm2" {
+            return "iTerm"
+        }
         if environment["WARP_IS_LOCAL_SHELL_SESSION"] != nil {
             return "Warp"
         }
-
-        let termProgram = environment["TERM_PROGRAM"]?.lowercased()
-        switch termProgram {
-        case .some("apple_terminal"):
-            return "Terminal"
-        case .some("iterm.app"), .some("iterm2"):
-            return "iTerm"
-        case let value? where value.contains("ghostty"):
-            // cmux also sets TERM_PROGRAM=ghostty; already handled above via
-            // CMUX_WORKSPACE_ID / CMUX_SOCKET_PATH, so reaching here means
-            // genuine Ghostty.
+        if environment["GHOSTTY_RESOURCES_DIR"] != nil {
             return "Ghostty"
-        case let value? where value.contains("warp"):
-            return "Warp"
-        case .some("kaku"):
-            return "Kaku"
-        case .some("wezterm"):
-            return "WezTerm"
-        case .some("vscode"):
-            // Cursor also sets TERM_PROGRAM=vscode; check its unique env var first
-            if environment["CURSOR_TRACE_ID"] != nil {
-                return "Cursor"
-            }
-            return "VS Code"
-        case .some("vscode-insiders"):
-            return "VS Code Insiders"
-        case .some("windsurf"):
-            return "Windsurf"
-        case .some("trae"):
-            return "Trae"
-        default:
-            break
         }
 
         // JetBrains IDEs set TERMINAL_EMULATOR=JetBrains-JediTerm.

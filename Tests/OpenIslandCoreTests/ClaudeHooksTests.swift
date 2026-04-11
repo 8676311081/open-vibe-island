@@ -181,6 +181,32 @@ struct ClaudeHooksTests {
     }
 
     @Test
+    func claudeInferTerminalAppPrefersWarpOverLeakedGhosttyEnvVars() {
+        // Regression: launching Warp from a Ghostty tab leaks
+        // GHOSTTY_RESOURCES_DIR (and friends) into every Warp shell via
+        // macOS GUI app environment inheritance. The previous env-var-first
+        // ordering tagged those Warp shells as Ghostty, causing
+        // terminalLocator to query Ghostty's focused tab and stamp a
+        // foreign Ghostty pane onto the Warp session's jumpTarget.
+        // TERM_PROGRAM is the only signal that doesn't leak this way and
+        // must dominate per-app env vars.
+        let payload = ClaudeHookPayload(
+            cwd: "/tmp/demo", hookEventName: .sessionStart, sessionID: "s1"
+        ).withRuntimeContext(
+            environment: [
+                "TERM_PROGRAM": "WarpTerminal",
+                "WARP_IS_LOCAL_SHELL_SESSION": "1",
+                "GHOSTTY_RESOURCES_DIR": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+                "GHOSTTY_BIN_DIR": "/Applications/Ghostty.app/Contents/MacOS",
+            ],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) }
+        )
+
+        #expect(payload.terminalApp == "Warp")
+    }
+
+    @Test
     func claudeDefaultJumpTargetUsesUnknownSentinelForUnrecognizedTerminal() {
         let payload = ClaudeHookPayload(
             cwd: "/tmp/demo", hookEventName: .sessionStart, sessionID: "s1"
