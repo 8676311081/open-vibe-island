@@ -18,6 +18,8 @@ Package.resolved
 # Local tooling artifacts
 .claude/
 .playwright-mcp/
+.omc/
+docs/superpowers/
 output/
 
 # Logs and temp files
