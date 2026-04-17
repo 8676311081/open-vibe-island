@@ -532,15 +532,28 @@ struct ActiveAgentProcessDiscovery {
 
     private func isClaudeProcess(command: String) -> Bool {
         let lowered = command.lowercased()
-        if lowered.contains("/.local/bin/claude") {
+        // Well-known install footprints. `/.claude/local/` is the official
+        // installer's in-home path; `@anthropic-ai/claude-code` is the npm
+        // package; `/claude-code/cli` catches hash-suffixed pnpm / yarn /
+        // bun store paths; `/.local/bin/claude` is the original allowlist
+        // entry we want to keep working.
+        if lowered.contains("/.local/bin/claude")
+            || lowered.contains("/.claude/local/")
+            || lowered.contains("@anthropic-ai/claude-code")
+            || lowered.contains("/claude-code/cli")
+        {
             return true
         }
 
-        guard let firstToken = lowered.split(separator: " ").first else {
+        guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
             return false
         }
 
-        return firstToken == "claude"
+        // Match bare `claude` plus any absolute path ending in `/claude`,
+        // so homebrew (`/opt/homebrew/bin/claude`, `/usr/local/bin/claude`),
+        // mise / asdf shims, and user-local installs register the same way
+        // codex already does.
+        return firstToken == "claude" || firstToken.hasSuffix("/claude")
     }
 
     private static func commandOutput(executablePath: String, arguments: [String]) -> String? {
