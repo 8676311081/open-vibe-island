@@ -106,15 +106,28 @@ public typealias WatchActiveSessionCountProvider = @Sendable () -> Int
 ///
 /// Uses `NWListener` for TCP + Bonjour advertising of `_openisland._tcp`.
 /// Implements a minimal HTTP/1.1 parser for 4 endpoints:
-/// - `POST /pair` — submit 4-digit pairing code, receive session token
+/// - `POST /pair` — submit 6-digit pairing code, receive session token
 /// - `GET /events` — SSE stream of agent events
 /// - `POST /resolution` — submit Watch action decisions
 /// - `GET /status` — connection and session status
 public final class WatchHTTPEndpoint: @unchecked Sendable {
     private static let logger = Logger(subsystem: "app.openisland", category: "WatchHTTPEndpoint")
     private static let serviceType = "_openisland._tcp"
-    private static let pairingCodeLength = 4
+    private static let pairingCodeLength = 6
     private static let pairingCodeExpiry: TimeInterval = 120 // 2 minutes
+
+    // Brute-force protection tunables. A 6-digit code is 1M values; combined
+    // with a 5-minute rolling window of 10 failures per peer IP and a
+    // 5-minute penalty box, a determined LAN attacker needs ~1000 years of
+    // sustained guessing to exhaust the space — long enough that user
+    // rotation (2-min expiry) and manual revocation dominate.
+    private static let pairFailuresBeforeCodeRotation = 3
+    private static let pairFailuresBeforeBlock = 10
+    private static let pairFailureWindow: TimeInterval = 300
+    private static let pairBlockDuration: TimeInterval = 300
+    // Max request size we accept. The four JSON bodies this endpoint handles
+    // are all tiny; anything bigger than 64 KiB is pathological.
+    private static let maxRequestBytes = 64 * 1024
 
     private let queue = DispatchQueue(label: "app.openisland.watch.http", qos: .userInitiated)
 
@@ -122,6 +135,14 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     private var currentPairingCode: String = ""
     private var pairingCodeGeneratedAt: Date = .distantPast
     private var validTokens: Set<String> = []
+
+    // Per-peer brute-force accounting. Keyed by peer IP (not port) so a
+    // determined attacker can't sidestep by rotating source ports.
+    private struct PairAttemptLedger {
+        var failures: [Date] = []
+        var blockedUntil: Date = .distantPast
+    }
+    private var pairAttempts: [String: PairAttemptLedger] = [:]
 
     // SSE connections
     private var sseConnections: [UUID: NWConnection] = [:]
@@ -248,11 +269,15 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
 
     private func handleNewConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
-        receiveHTTPRequest(on: connection)
+        receiveHTTPRequest(on: connection, buffer: Data())
     }
 
-    private func receiveHTTPRequest(on connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, isComplete, error in
+    /// Accumulate request bytes until we have full headers (CRLFCRLF) plus
+    /// the Content-Length body. Previously a single `receive` was assumed
+    /// to carry the whole request; any TCP fragmentation or body > the
+    /// first chunk silently produced a parse failure.
+    private func receiveHTTPRequest(on connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] content, _, isComplete, error in
             guard let self else { return }
 
             if let error {
@@ -261,27 +286,57 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
                 return
             }
 
-            guard let data = content, !data.isEmpty else {
-                if isComplete {
-                    connection.cancel()
-                }
+            var accumulated = buffer
+            if let chunk = content, !chunk.isEmpty {
+                accumulated.append(chunk)
+            }
+
+            if accumulated.count > Self.maxRequestBytes {
+                self.sendHTTPResponse(connection: connection, status: "413 Payload Too Large", body: #"{"error":"request too large"}"#)
                 return
             }
 
-            self.routeHTTPRequest(data: data, connection: connection)
+            let separator = Data("\r\n\r\n".utf8)
+            guard let headerEnd = accumulated.range(of: separator) else {
+                if isComplete {
+                    connection.cancel()
+                    return
+                }
+                self.receiveHTTPRequest(on: connection, buffer: accumulated)
+                return
+            }
+
+            let headerData = accumulated.subdata(in: 0..<headerEnd.lowerBound)
+            let bodySoFar = accumulated.subdata(in: headerEnd.upperBound..<accumulated.count)
+
+            guard let headerString = String(data: headerData, encoding: .utf8) else {
+                self.sendHTTPResponse(connection: connection, status: "400 Bad Request", body: #"{"error":"invalid request"}"#)
+                return
+            }
+
+            let (method, path, headers) = Self.parseRequestLineAndHeaders(headerString)
+            let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+
+            if bodySoFar.count >= contentLength {
+                let body: String? = contentLength > 0
+                    ? String(data: bodySoFar.subdata(in: 0..<contentLength), encoding: .utf8)
+                    : nil
+                self.routeHTTPRequest(method: method, path: path, headers: headers, body: body, connection: connection)
+                return
+            }
+
+            if isComplete {
+                connection.cancel()
+                return
+            }
+
+            self.receiveHTTPRequest(on: connection, buffer: accumulated)
         }
     }
 
     // MARK: - Private: HTTP Routing
 
-    private func routeHTTPRequest(data: Data, connection: NWConnection) {
-        guard let requestString = String(data: data, encoding: .utf8) else {
-            sendHTTPResponse(connection: connection, status: "400 Bad Request", body: #"{"error":"invalid request"}"#)
-            return
-        }
-
-        let (method, path, headers, body) = parseHTTPRequest(requestString)
-
+    private func routeHTTPRequest(method: String, path: String, headers: [String: String], body: String?, connection: NWConnection) {
         switch (method, path) {
         case ("POST", "/pair"):
             handlePair(body: body, connection: connection)
@@ -303,6 +358,13 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     // MARK: - Private: Endpoint Handlers
 
     private func handlePair(body: String?, connection: NWConnection) {
+        let peerIP = Self.peerIP(for: connection)
+
+        if let ledger = pairAttempts[peerIP], ledger.blockedUntil > Date() {
+            sendHTTPResponse(connection: connection, status: "429 Too Many Requests", body: #"{"error":"too many failed attempts"}"#)
+            return
+        }
+
         guard let body, let bodyData = body.data(using: .utf8),
               let request = try? JSONDecoder().decode(WatchPairRequest.self, from: bodyData) else {
             sendHTTPResponse(connection: connection, status: "400 Bad Request", body: #"{"error":"invalid body"}"#)
@@ -316,16 +378,16 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return
         }
 
-        guard request.code == currentPairingCode else {
+        guard Self.constantTimeEquals(request.code, currentPairingCode) else {
+            recordPairFailure(peerIP: peerIP)
             sendHTTPResponse(connection: connection, status: "403 Forbidden", body: #"{"error":"invalid pairing code"}"#)
             return
         }
 
-        // Generate token
+        // Success: wipe the peer's failure ledger, rotate the code, issue token.
+        pairAttempts.removeValue(forKey: peerIP)
         let token = UUID().uuidString
         validTokens.insert(token)
-
-        // Regenerate pairing code after successful pair
         regeneratePairingCodeUnsafe()
 
         let response = WatchPairResponse(token: token)
@@ -444,16 +506,64 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
         return validTokens.contains(token)
     }
 
+    // MARK: - Private: Brute-force accounting
+
+    /// Must be called on `queue`.
+    private func recordPairFailure(peerIP: String) {
+        let now = Date()
+        var ledger = pairAttempts[peerIP] ?? PairAttemptLedger()
+
+        ledger.failures = ledger.failures.filter { now.timeIntervalSince($0) < Self.pairFailureWindow }
+        ledger.failures.append(now)
+
+        if ledger.failures.count >= Self.pairFailuresBeforeBlock {
+            ledger.blockedUntil = now.addingTimeInterval(Self.pairBlockDuration)
+            regeneratePairingCodeUnsafe()
+            Self.logger.warning("Pair attempts from \(peerIP, privacy: .public) blocked for \(Int(Self.pairBlockDuration))s after \(ledger.failures.count) failures")
+        } else if ledger.failures.count >= Self.pairFailuresBeforeCodeRotation {
+            regeneratePairingCodeUnsafe()
+            Self.logger.info("Rotated pairing code after \(ledger.failures.count) failures from \(peerIP, privacy: .public)")
+        }
+
+        pairAttempts[peerIP] = ledger
+    }
+
+    private static func peerIP(for connection: NWConnection) -> String {
+        switch connection.endpoint {
+        case let .hostPort(host, _):
+            switch host {
+            case let .ipv4(addr):
+                return "\(addr)"
+            case let .ipv6(addr):
+                return "\(addr)"
+            case let .name(name, _):
+                return name
+            @unknown default:
+                return "unknown"
+            }
+        default:
+            return "unknown"
+        }
+    }
+
+    /// Constant-time string comparison to avoid leaking pairing code prefix
+    /// via timing side channels. Length mismatch short-circuits because the
+    /// code length is a fixed, attacker-known constant anyway.
+    private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
+        let ab = Array(a.utf8)
+        let bb = Array(b.utf8)
+        guard ab.count == bb.count else { return false }
+        var diff: UInt8 = 0
+        for i in 0..<ab.count { diff |= ab[i] ^ bb[i] }
+        return diff == 0
+    }
+
     // MARK: - Private: HTTP Helpers
 
-    private func parseHTTPRequest(_ raw: String) -> (method: String, path: String, headers: [String: String], body: String?) {
-        let parts = raw.components(separatedBy: "\r\n\r\n")
-        let headerSection = parts[0]
-        let body = parts.count > 1 ? parts[1] : nil
-
-        let lines = headerSection.components(separatedBy: "\r\n")
+    private static func parseRequestLineAndHeaders(_ header: String) -> (method: String, path: String, headers: [String: String]) {
+        let lines = header.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else {
-            return ("", "", [:], nil)
+            return ("", "", [:])
         }
 
         let requestParts = requestLine.split(separator: " ", maxSplits: 2)
@@ -463,27 +573,22 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             if let colonIndex = line.firstIndex(of: ":") {
-                let key = String(line[line.startIndex..<colonIndex]).trimmingCharacters(in: .whitespaces)
+                let key = String(line[line.startIndex..<colonIndex]).trimmingCharacters(in: .whitespaces).lowercased()
                 let value = String(line[line.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
                 headers[key] = value
             }
         }
 
-        return (method, path, headers, body?.isEmpty == true ? nil : body)
+        return (method, path, headers)
     }
 
     private func sendHTTPResponse(connection: NWConnection, status: String, body: String, contentType: String = "application/json") {
-        let response = """
-        HTTP/1.1 \(status)\r
-        Content-Type: \(contentType)\r
-        Content-Length: \(body.utf8.count)\r
-        Connection: close\r
-        \r
-        \(body)
-        """
+        let bodyData = Data(body.utf8)
+        let headerString = "HTTP/1.1 \(status)\r\nContent-Type: \(contentType)\r\nContent-Length: \(bodyData.count)\r\nConnection: close\r\n\r\n"
+        var response = Data(headerString.utf8)
+        response.append(bodyData)
 
-        guard let data = response.data(using: .utf8) else { return }
-        connection.send(content: data, isComplete: true, completion: .contentProcessed { _ in
+        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in
             connection.cancel()
         })
     }
