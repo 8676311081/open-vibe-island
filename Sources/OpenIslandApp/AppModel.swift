@@ -361,7 +361,7 @@ final class AppModel {
 
     /// Current pairing code for display in the settings UI.
     var watchPairingCode: String {
-        watchRelay?.endpoint.currentCode() ?? "----"
+        watchRelay?.endpoint.currentCode() ?? "------"
     }
 
     /// Number of currently connected iPhone SSE clients.
