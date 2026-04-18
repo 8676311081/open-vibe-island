@@ -32,6 +32,16 @@
 
 ---
 
+> ℹ️ **About this repository**
+>
+> This is a community-maintained documentation companion to [**Octane0411/open-vibe-island**](https://github.com/Octane0411/open-vibe-island), with enhanced Chinese documentation and a sharpened "multi-agent macOS console" positioning.
+>
+> - **Binaries / Releases** — signed & notarized DMGs come from [upstream releases](https://github.com/Octane0411/open-vibe-island/releases). This repo does not ship separate binaries.
+> - **Code contributions** — please submit PRs to the [upstream repo](https://github.com/Octane0411/open-vibe-island).
+> - **This repo's focus** — bilingual README polish, FAQ, Chinese community onboarding, documentation fidelity.
+
+---
+
 ## What is Open Island?
 
 Open Island sits in your Mac's **notch** (or top bar) and gives you a real-time control surface for your AI coding agents — session status, permission approvals, and instant jump-back to the right terminal. All without leaving your flow.
