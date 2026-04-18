@@ -96,9 +96,11 @@ Repository: Octane0411/open-vibe-island
 
 Open Island is a native macOS companion app for AI coding agents. It sits in the notch/top-bar area and monitors local agent sessions, surfaces permission requests, answers questions, and provides "jump back" to the correct terminal context. Local-first, no server dependency.
 
-**Supported agents**: Codex, Claude Code
+**Supported agents** (9): Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qoder, Qwen Code, Factory, CodeBuddy
 
-**Supported terminals**: Terminal.app, Ghostty
+**Supported terminals & IDEs** (15+): Terminal.app, Ghostty, iTerm2, WezTerm, Zellij, tmux, cmux, Kaku, Warp, VS Code, Cursor, Windsurf, Trae, JetBrains IDEs (IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover)
+
+See the [README](README.md#supported-agents--terminals) for the full compatibility matrix.
 
 ### Prerequisites
 
