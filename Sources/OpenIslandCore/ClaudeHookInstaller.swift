@@ -162,7 +162,13 @@ public enum ClaudeHookInstaller {
     }
 
     private static func serialize(_ object: [String: Any]) throws -> Data {
-        try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        // Route through the shared backup helper so settings.json
+        // formatting (slash escaping, colon spacing) stays consistent
+        // across every site that writes ~/.claude/settings.json
+        // (StatusLine installer, RTK installer, this Claude hook
+        // installer). See `ClaudeSettingsBackupHelper.serializeSettings`
+        // for formatting details and the known key-order limitation.
+        try ClaudeSettingsBackupHelper.serializeSettings(object)
     }
 
     private static func sanitize(groups: [Any], managedCommand: String?) -> [[String: Any]] {

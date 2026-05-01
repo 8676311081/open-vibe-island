@@ -204,4 +204,73 @@ struct ClaudeSettingsBackupHelperTests {
             try ClaudeSettingsBackupHelper.restoreLatestBackup(directory: dir)
         }
     }
+
+    // MARK: - Output formatting (matches Claude Code's native shape)
+
+    /// helper output is structurally what Claude Code's settings.json
+    /// writer produces:  no escaped forward slashes, and no leading
+    /// space before the colon that separates a JSON key from its
+    /// value. Both pin formatting drift on round-trip — without these,
+    /// `git diff settings.json` after a single Open Island
+    /// install/uninstall flashes ~50 false-positive line changes.
+    @Test
+    func serializeSettingsDoesNotEscapeSlashOrLeadColonWithSpace() throws {
+        let dict: [String: Any] = [
+            "command": "/Users/qwen/.open-island/bin/rtk",
+            "nested": ["foo": "bar"],
+        ]
+        let bytes = try ClaudeSettingsBackupHelper.serializeSettings(dict)
+        let s = String(data: bytes, encoding: .utf8) ?? ""
+
+        // No backslash-escaped forward slash anywhere.
+        #expect(!s.contains("\\/"))
+        // No structural ` : ` (colon with leading space) on any line.
+        // We do allow ` : ` inside a string value — but the regression
+        // we're guarding against is the structural one.
+        for line in s.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            #expect(!trimmed.contains(#"" : "#),
+                    "found leading-space colon in line: \(line)")
+        }
+    }
+
+    /// Colon-space normalizer must not touch `:` that appears inside
+    /// a JSON string value (e.g. URLs, time-of-day strings, free text).
+    @Test
+    func normalizeColonSpacingLeavesInStringColonsAlone() {
+        let input = #"""
+        {
+          "url" : "http://example.com:8080/path",
+          "msg" : "key : value pair in user text"
+        }
+        """#
+        let normalized = ClaudeSettingsBackupHelper.normalizeColonSpacing(input)
+        // Structural colons are flush.
+        #expect(normalized.contains(#""url": "#))
+        #expect(normalized.contains(#""msg": "#))
+        // In-string colons are unchanged.
+        #expect(normalized.contains(#"http://example.com:8080/path"#))
+        #expect(normalized.contains(#"key : value pair in user text"#))
+    }
+
+    /// Backslash escapes inside JSON strings shouldn't fool the
+    /// colon-space state machine. `"\""` is a single escaped quote
+    /// that must not flip us out of the in-string state, and
+    /// `"\\"` is an escaped backslash that resumes the string.
+    @Test
+    func normalizeColonSpacingHandlesEscapedQuotesAndBackslashes() {
+        let input = #"""
+        {
+          "a" : "x\"y : z",
+          "b" : "trail\\",
+          "c" : "after"
+        }
+        """#
+        let normalized = ClaudeSettingsBackupHelper.normalizeColonSpacing(input)
+        // `"a": ` flushed; the in-string `: z` survives.
+        #expect(normalized.contains(#""a": "#))
+        #expect(normalized.contains(#"x\"y : z"#))
+        // After the trailing `\\` string ends; the next `"c" :` flushed.
+        #expect(normalized.contains(#""c": "#))
+    }
 }

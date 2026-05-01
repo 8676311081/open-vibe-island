@@ -39,6 +39,71 @@ public enum ClaudeSettingsBackupHelper {
         case delete
     }
 
+    // MARK: - Serialization
+
+    /// Serialize a Claude Code settings dict using formatting that
+    /// minimizes diff drift against the file Claude Code itself
+    /// produces:
+    ///
+    /// - `.prettyPrinted` (2-space indent, like `JSON.stringify(_, null, 2)`)
+    /// - `.withoutEscapingSlashes` so `/` is not rewritten as `\/`
+    ///   (Foundation's default does — Claude Code/JS doesn't)
+    /// - Post-process to drop the single space Foundation inserts
+    ///   *before* every colon (`"key" : v` → `"key": v`)
+    ///
+    /// **Known limitation:** key order is implementation-defined.
+    /// Foundation does not preserve insertion order on Dictionary
+    /// serialization, and we deliberately do not pass `.sortedKeys`
+    /// because that would alphabetize the user's existing
+    /// settings.json on every install. Result: a fresh-from-Claude-Code
+    /// settings.json may have keys in a different order after the first
+    /// helper-driven write. Subsequent helper-driven writes are
+    /// deterministic in the same process and stable across rebuild.
+    public static func serializeSettings(_ dict: [String: Any]) throws -> Data {
+        let raw = try JSONSerialization.data(
+            withJSONObject: dict,
+            options: [.prettyPrinted, .withoutEscapingSlashes]
+        )
+        guard let str = String(data: raw, encoding: .utf8) else { return raw }
+        return Data(normalizeColonSpacing(str).utf8)
+    }
+
+    /// Drop the leading space Foundation inserts before every colon in
+    /// pretty-printed JSON, but only when the colon is structural
+    /// (outside a JSON string). State-machine pass over the bytes to
+    /// avoid touching `" : "` that occurs inside a string value.
+    static func normalizeColonSpacing(_ s: String) -> String {
+        enum State { case outside, inString, inStringEscape }
+        var out = ""
+        out.reserveCapacity(s.count)
+        var state: State = .outside
+        for ch in s {
+            switch state {
+            case .outside:
+                if ch == "\"" {
+                    state = .inString
+                    out.append(ch)
+                } else {
+                    if ch == ":", out.last == " " {
+                        out.removeLast()
+                    }
+                    out.append(ch)
+                }
+            case .inString:
+                if ch == "\\" {
+                    state = .inStringEscape
+                } else if ch == "\"" {
+                    state = .outside
+                }
+                out.append(ch)
+            case .inStringEscape:
+                state = .inString
+                out.append(ch)
+            }
+        }
+        return out
+    }
+
     // MARK: - Read
 
     /// Read-only snapshot of `settings.json`. Returns an empty dict when
@@ -81,10 +146,7 @@ public enum ClaudeSettingsBackupHelper {
 
         try block(&settings)
 
-        let data = try JSONSerialization.data(
-            withJSONObject: settings,
-            options: [.prettyPrinted, .sortedKeys]
-        )
+        let data = try serializeSettings(settings)
         try data.write(to: url, options: .atomic)
         return backup
     }
