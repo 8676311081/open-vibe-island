@@ -529,6 +529,10 @@ final class AppModel {
 
         overlay.appModel = self
         overlay.restoreDisplayPreference()
+        // Wire RTK telemetry reader into the same LLMStatsStore that
+        // LLMProxyCoordinator writes per-client request stats into,
+        // so the Compression card and Spend cards read off one source.
+        hooks.llmStatsStore = llmProxy.statsStore
         overlay.onStatusMessage = { [weak self] message in
             self?.lastActionMessage = message
         }

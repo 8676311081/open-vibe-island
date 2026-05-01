@@ -91,6 +91,21 @@ final class HookInstallationCoordinator {
     @ObservationIgnored
     private var rtkWatchdog: RTKWatchdog?
 
+    /// Telemetry reader, lifecycle-twinned with the watchdog.
+    /// Created on install, polls `<bin> gain --format json` every
+    /// 60 s and pushes results into `llmStatsStore`. Torn down on
+    /// uninstall / app-quit.
+    @ObservationIgnored
+    private var rtkTelemetryReader: RTKTelemetryReader?
+
+    /// Injected by `AppModel` at init so `installRtk()` can wire the
+    /// telemetry reader to the same `LLMStatsStore` that
+    /// `LLMProxyCoordinator` writes per-client request stats into.
+    /// Optional so the coordinator stays usable in tests / debug
+    /// scenarios that don't construct a proxy.
+    @ObservationIgnored
+    var llmStatsStore: LLMStatsStore?
+
     @ObservationIgnored
     private var claudeUsageMonitorTask: Task<Void, Never>?
 
@@ -1128,8 +1143,8 @@ final class HookInstallationCoordinator {
         rtkStatus = try? rtkInstallationManager.status()
     }
 
-    /// Download + install RTK and arm the watchdog. UI sets
-    /// `isRtkSetupBusy` while this runs.
+    /// Download + install RTK and arm the watchdog + telemetry
+    /// reader. UI sets `isRtkSetupBusy` while this runs.
     func installRtk() async {
         guard !isRtkSetupBusy else { return }
         isRtkSetupBusy = true
@@ -1142,6 +1157,24 @@ final class HookInstallationCoordinator {
                 let watchdog = RTKWatchdog(manager: manager)
                 watchdog.start()
                 rtkWatchdog = watchdog
+                if let store = llmStatsStore {
+                    let reader = RTKTelemetryReader(
+                        manager: manager,
+                        store: store,
+                        onWarning: { [weak self] msg in
+                            // Bounce back to the main actor so UI
+                            // status banner can render the warning
+                            // verbatim. Reader fires this off a
+                            // detached background Task; capture self
+                            // weakly so the closure is Sendable.
+                            Task { @MainActor in
+                                self?.onStatusMessage?(msg)
+                            }
+                        }
+                    )
+                    reader.start()
+                    rtkTelemetryReader = reader
+                }
                 onStatusMessage?("RTK \(status.rtkVersion) installed.")
             }
         } catch {
@@ -1150,11 +1183,14 @@ final class HookInstallationCoordinator {
         }
     }
 
-    /// Tear down RTK and the watchdog. Idempotent.
+    /// Tear down RTK, the watchdog, and the telemetry reader.
+    /// Idempotent.
     func uninstallRtk() {
         guard !isRtkSetupBusy else { return }
         isRtkSetupBusy = true
         defer { isRtkSetupBusy = false }
+        rtkTelemetryReader?.stop()
+        rtkTelemetryReader = nil
         rtkWatchdog?.stop()
         rtkWatchdog = nil
         do {
@@ -1167,9 +1203,11 @@ final class HookInstallationCoordinator {
     }
 
     /// Called from `applicationWillTerminate` so a clean Cmd+Q leaves
-    /// no ghost background task. Does *not* uninstall — the user's
+    /// no ghost background tasks. Does *not* uninstall — the user's
     /// hook configuration survives across app restarts.
     func stopRtkWatchdog() {
+        rtkTelemetryReader?.stop()
+        rtkTelemetryReader = nil
         rtkWatchdog?.stop()
         rtkWatchdog = nil
     }

@@ -134,15 +134,71 @@ public struct LLMDuplicateWarning: Codable, Sendable, Equatable {
     }
 }
 
+/// Cross-client compression telemetry sourced from RTK's own
+/// `~/Library/Application Support/rtk/history.db`, surfaced via
+/// `rtk gain --format json`. Stored as a SINGLE top-level field on
+/// `LLMStatsSnapshot` (not inside per-day per-client `LLMDayBucket`s)
+/// because RTK accumulates globally — no per-day, no per-client
+/// breakdown. Trying to fan it out into `days[date][client]` would
+/// invent attribution data we don't have.
+///
+/// Keys match what RTK emits, just camelCased. `lastUpdatedAt` is
+/// Open Island's own bookkeeping — RTK doesn't ship it. Optional on
+/// decode so legacy `stats.json` files that pre-date this field
+/// round-trip cleanly.
+public struct CompressionSummary: Codable, Sendable, Equatable {
+    public var totalCommands: Int
+    public var totalInputTokens: Int
+    public var totalOutputTokens: Int
+    public var totalSavedTokens: Int
+    public var avgSavingsPct: Double
+    public var totalTimeMs: Int
+    public var avgTimeMs: Int
+    public var lastUpdatedAt: Date
+
+    public init(
+        totalCommands: Int = 0,
+        totalInputTokens: Int = 0,
+        totalOutputTokens: Int = 0,
+        totalSavedTokens: Int = 0,
+        avgSavingsPct: Double = 0,
+        totalTimeMs: Int = 0,
+        avgTimeMs: Int = 0,
+        lastUpdatedAt: Date = Date()
+    ) {
+        self.totalCommands = totalCommands
+        self.totalInputTokens = totalInputTokens
+        self.totalOutputTokens = totalOutputTokens
+        self.totalSavedTokens = totalSavedTokens
+        self.avgSavingsPct = avgSavingsPct
+        self.totalTimeMs = totalTimeMs
+        self.avgTimeMs = avgTimeMs
+        self.lastUpdatedAt = lastUpdatedAt
+    }
+}
+
 /// On-disk snapshot. `days` is keyed by `yyyy-MM-dd` (local time) →
-/// client raw value → bucket. Bumping `version` is the migration hook.
+/// client raw value → bucket. `compressionSummary` is the single
+/// top-level field for RTK telemetry — see `CompressionSummary` for
+/// the no-per-day-no-per-client rationale. Bumping `version` is the
+/// migration hook.
 public struct LLMStatsSnapshot: Codable, Sendable, Equatable {
     public var version: Int
     public var days: [String: [String: LLMDayBucket]]
+    /// Optional: nil when RTK isn't installed or hasn't been polled
+    /// yet. Synthesized Codable on Optional uses `decodeIfPresent`,
+    /// so legacy `stats.json` files (no `compressionSummary` key)
+    /// round-trip cleanly.
+    public var compressionSummary: CompressionSummary?
 
-    public init(version: Int = 1, days: [String: [String: LLMDayBucket]] = [:]) {
+    public init(
+        version: Int = 1,
+        days: [String: [String: LLMDayBucket]] = [:],
+        compressionSummary: CompressionSummary? = nil
+    ) {
         self.version = version
         self.days = days
+        self.compressionSummary = compressionSummary
     }
 }
 
@@ -247,6 +303,23 @@ public actor LLMStatsStore {
     public func clearToday(date: Date = Date()) {
         let key = Self.dayKey(for: date)
         snapshot.days.removeValue(forKey: key)
+        persist()
+    }
+
+    /// Replace the cross-client compression summary. Called by
+    /// `RTKTelemetryReader` after every successful `rtk gain` poll.
+    public func recordCompressionSummary(_ summary: CompressionSummary) {
+        snapshot.compressionSummary = summary
+        persist()
+    }
+
+    /// Drop the compression summary entirely — used when RTK gets
+    /// uninstalled (binary disappears from disk). UI then renders the
+    /// metric card as "未启用 / —". No-op if already nil so we don't
+    /// thrash the on-disk file every poll cycle when RTK is absent.
+    public func clearCompressionSummary() {
+        guard snapshot.compressionSummary != nil else { return }
+        snapshot.compressionSummary = nil
         persist()
     }
 
