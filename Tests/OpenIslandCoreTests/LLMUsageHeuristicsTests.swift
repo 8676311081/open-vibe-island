@@ -90,7 +90,8 @@ struct LLMPricingTests {
         // 1M input + 200K output on sonnet-4.5 = $3 + 0.2 * $15 = $6.
         let usage = TokenUsage(input: 1_000_000, output: 200_000)
         let cost = LLMPricing.costUSD(model: "claude-sonnet-4-5", usage: usage)
-        #expect(abs(cost - 6.00) < 1e-9)
+        #expect(cost != nil)
+        #expect(abs((cost ?? 0) - 6.00) < 1e-9)
     }
 
     @Test
@@ -98,7 +99,17 @@ struct LLMPricingTests {
         // 1M cache write @ $3.75 + 1M cache read @ $0.30 on sonnet.
         let usage = TokenUsage(cacheWrite: 1_000_000, cacheRead: 1_000_000)
         let cost = LLMPricing.costUSD(model: "claude-sonnet-4-5", usage: usage)
-        #expect(abs(cost - (3.75 + 0.30)) < 1e-9)
+        #expect(cost != nil)
+        #expect(abs((cost ?? 0) - (3.75 + 0.30)) < 1e-9)
+    }
+
+    @Test
+    func unknownModelReturnsNilCost() {
+        // Silent zero would hide pricing-table drift — make the caller
+        // distinguish "we have no price" from "the math came out to 0".
+        let usage = TokenUsage(input: 1_000_000, output: 1_000_000)
+        #expect(LLMPricing.costUSD(model: "made-up-model-9000", usage: usage) == nil)
+        #expect(LLMPricing.costUSD(model: nil, usage: usage) == nil)
     }
 }
 
@@ -185,7 +196,7 @@ struct LLMStatsStoreTests {
             date: Date(),
             client: .claudeCode,
             usage: usage,
-            costUsd: 0.42
+            costUsd: 0.42 as Double?
         )
         let raw = try Data(contentsOf: tmp)
         let decoder = JSONDecoder()
@@ -197,5 +208,26 @@ struct LLMStatsStoreTests {
         #expect(bucket?.tokensIn == 1500)
         #expect(bucket?.tokensOut == 200)
         #expect(abs((bucket?.costUsd ?? 0) - 0.42) < 1e-9)
+        #expect(bucket?.unpricedTurns == 0)
+    }
+
+    @Test
+    func unpricedTurnsBumpedWhenCostNil() async {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = LLMStatsStore(url: tmp)
+        await store.recordRequestCompletion(
+            date: Date(),
+            client: .codex,
+            usage: TokenUsage(input: 100, output: 50),
+            costUsd: nil
+        )
+        let snap = await store.currentSnapshot()
+        let bucket = snap.days.values.first?[LLMClient.codex.rawValue]
+        #expect(bucket?.turns == 1)
+        #expect(bucket?.tokensIn == 100)
+        #expect(bucket?.unpricedTurns == 1)
+        #expect((bucket?.costUsd ?? -1) == 0)
     }
 }

@@ -122,8 +122,13 @@ public enum LLMPricing {
         return nil
     }
 
-    public static func costUSD(model: String?, usage: TokenUsage) -> Double {
-        guard let p = priceFor(model: model) else { return 0 }
+    /// Returns nil for models not in the pricing table — caller must
+    /// distinguish "we have no price" (display `—`, increment
+    /// `unpricedTurns`) from "the math came out to zero" (display
+    /// `$0.00`). Silent zero would hide drift between the table and
+    /// real provider pricing.
+    public static func costUSD(model: String?, usage: TokenUsage) -> Double? {
+        guard let p = priceFor(model: model) else { return nil }
         let scale = 1_000_000.0
         return Double(usage.input) * p.inputPerMTok / scale
             + Double(usage.cacheWrite) * p.cacheWritePerMTok / scale
