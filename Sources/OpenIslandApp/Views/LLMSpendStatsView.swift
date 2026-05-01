@@ -268,9 +268,16 @@ struct LLMSpendStatsView: View {
             // cumulative `total_saved` from rtk gain. nil → "—" with
             // explanatory tooltip; UI never invents a per-range
             // attribution we don't have.
+            // Saved-by-compression is the only card whose value is
+            // ambiguous without an explicit unit ("750" alone reads
+            // as "tokens? requests? K tokens?"). Tokens / Cost /
+            // Cache Hit / Messages each have their unit visible
+            // already (M suffix, $ prefix, % suffix, label = "messages
+            // count"). Pass `unit: "tokens"` here only.
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardSavedByCompression"),
                 value: compression.map { formattedTokens($0.totalSavedTokens) } ?? "—",
+                unit: compression == nil ? nil : "tokens",
                 emphasis: compression == nil ? .secondary : nil,
                 tooltip: compression == nil
                     ? lang.t("settings.llmSpend.stats.savedByCompressionUnavailable")
@@ -282,6 +289,7 @@ struct LLMSpendStatsView: View {
     private func statCard(
         label: String,
         value: String,
+        unit: String? = nil,
         emphasis: Color? = nil,
         tooltip: String? = nil
     ) -> some View {
@@ -290,11 +298,19 @@ struct LLMSpendStatsView: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .tracking(0.4)
-            Text(value)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(emphasis ?? .primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(emphasis ?? .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                if let unit, !unit.isEmpty {
+                    Text(unit)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

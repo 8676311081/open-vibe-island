@@ -266,6 +266,48 @@ struct LLMStatsStoreTests {
     }
 
     @Test
+    func clearCompressionSummaryWipesStaleValueAfterRTKUninstall() async {
+        // Reproduces the bug observed during P2 UI smoke: RTK was
+        // installed, telemetry reader populated `compressionSummary`
+        // with cumulative saved tokens, then RTK was uninstalled.
+        // The reader stops on uninstall and never gets a chance to
+        // observe binary-absent → clear; without an explicit clear
+        // call from `HookInstallationCoordinator.uninstallRtk`, the
+        // metric card kept showing the pre-uninstall total
+        // ("750" with no RTK installed at all). This test pins the
+        // explicit-clear path.
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = LLMStatsStore(url: tmp)
+
+        await store.recordCompressionSummary(CompressionSummary(
+            totalCommands: 17,
+            totalSavedTokens: 750,
+            avgSavingsPct: 35.0
+        ))
+        let before = await store.currentSnapshot()
+        #expect(before.compressionSummary?.totalSavedTokens == 750)
+
+        await store.clearCompressionSummary()
+        let after = await store.currentSnapshot()
+        #expect(after.compressionSummary == nil)
+    }
+
+    @Test
+    func clearCompressionSummaryIsIdempotentNoOpWhenAlreadyNil() async {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = LLMStatsStore(url: tmp)
+        // Already nil — second call must not throw / corrupt.
+        await store.clearCompressionSummary()
+        await store.clearCompressionSummary()
+        let snap = await store.currentSnapshot()
+        #expect(snap.compressionSummary == nil)
+    }
+
+    @Test
     func cacheBreakdownIsRecorded() async {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")

@@ -1195,6 +1195,17 @@ final class HookInstallationCoordinator {
         rtkWatchdog = nil
         do {
             rtkStatus = try rtkInstallationManager.uninstall()
+            // Once the binary is gone, the cumulative
+            // `compressionSummary` we'd been mirroring out of
+            // `rtk gain --format json` is stale — the reader has
+            // already been stopped above, so without an explicit
+            // clear it would persist in stats.json forever (and
+            // the metric card would keep showing the pre-uninstall
+            // total, misleading the user about whether RTK is
+            // currently saving them anything).
+            if let store = llmStatsStore {
+                Task { await store.clearCompressionSummary() }
+            }
             onStatusMessage?("RTK uninstalled.")
         } catch {
             onStatusMessage?("RTK uninstall failed: \(error.localizedDescription)")
