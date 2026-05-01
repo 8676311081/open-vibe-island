@@ -221,3 +221,6 @@
 "settings.llmSpend.copied" = "已複製";
 "settings.llmSpend.unpriced" = "—";
 "settings.llmSpend.unpricedTooltip" = "部分輪次使用的模型不在價格表中：tokens 已計入，但金額未知。";
+"settings.llmSpend.upstreams" = "上游 URL";
+"settings.llmSpend.upstreamsHint" = "改這兩項可以把流量轉發到任何 OpenAI/Anthropic 相容閘道（如 tabcode、OpenRouter、自建 vllm）。留空則用官方端點。";
+"settings.llmSpend.upstreamInvalid" = "必須是帶主機的完整 http/https URL。";

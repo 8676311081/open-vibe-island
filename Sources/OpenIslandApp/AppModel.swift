@@ -591,6 +591,8 @@ final class AppModel {
 
     var llmProxyPort: UInt16 { llmProxy.port }
     var isLLMProxyRunning: Bool { llmProxy.isRunning }
+    var llmProxyOpenAIUpstream: URL { llmProxy.openAIUpstream }
+    var llmProxyAnthropicUpstream: URL { llmProxy.anthropicUpstream }
 
     func openLLMSpend() {
         selectedSettingsTab = .llmSpend
@@ -607,6 +609,23 @@ final class AppModel {
 
     func setLLMProxyPort(_ port: UInt16) {
         llmProxy.setPort(port)
+    }
+
+    /// Returns true if the URL was accepted (well-formed http/https with
+    /// a host) and applied; false if the input was rejected, in which
+    /// case the upstream stays at its prior value.
+    @discardableResult
+    func setLLMProxyOpenAIUpstream(_ raw: String) -> Bool {
+        guard let url = LLMProxyCoordinator.validatedUpstream(raw) else { return false }
+        llmProxy.setOpenAIUpstream(url)
+        return true
+    }
+
+    @discardableResult
+    func setLLMProxyAnthropicUpstream(_ raw: String) -> Bool {
+        guard let url = LLMProxyCoordinator.validatedUpstream(raw) else { return false }
+        llmProxy.setAnthropicUpstream(url)
+        return true
     }
 
     func clearTodayLLMStats() {

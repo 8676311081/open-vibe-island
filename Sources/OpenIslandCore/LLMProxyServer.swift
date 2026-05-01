@@ -6,17 +6,24 @@ import os
 
 public struct LLMProxyConfiguration: Sendable {
     public var port: UInt16
-    public var anthropicHost: String
-    public var openAIHost: String
+    /// Upstream base URLs. The request path from the inbound HTTP/1.1
+    /// request gets concatenated onto these — so a base of
+    /// `https://api2.tabcode.cc/openai/plus` plus a path of
+    /// `/v1/responses` ends up as
+    /// `https://api2.tabcode.cc/openai/plus/v1/responses`. This is what
+    /// makes the proxy work with any OpenAI-compatible gateway, not
+    /// just api.openai.com.
+    public var anthropicUpstream: URL
+    public var openAIUpstream: URL
 
     public init(
         port: UInt16 = 9710,
-        anthropicHost: String = "api.anthropic.com",
-        openAIHost: String = "api.openai.com"
+        anthropicUpstream: URL = URL(string: "https://api.anthropic.com")!,
+        openAIUpstream: URL = URL(string: "https://api.openai.com")!
     ) {
         self.port = port
-        self.anthropicHost = anthropicHost
-        self.openAIHost = openAIHost
+        self.anthropicUpstream = anthropicUpstream
+        self.openAIUpstream = openAIUpstream
     }
 
     public static let `default` = LLMProxyConfiguration()
@@ -266,10 +273,10 @@ public final class LLMProxyServer: @unchecked Sendable {
             path: head.path,
             headers: head.lowercasedHeaders
         )
-        let host: String
+        let upstreamBase: URL
         switch upstream {
-        case .anthropic: host = configuration.anthropicHost
-        case .openai: host = configuration.openAIHost
+        case .anthropic: upstreamBase = configuration.anthropicUpstream
+        case .openai: upstreamBase = configuration.openAIUpstream
         case .unknown:
             respondLocally(
                 state: state,
@@ -305,17 +312,17 @@ public final class LLMProxyServer: @unchecked Sendable {
             Task { await captured.proxyWillForward(ctx) }
         }
 
-        forward(context: context, host: host, state: state)
+        forward(context: context, upstreamBase: upstreamBase, state: state)
     }
 
     // MARK: - Forwarding
 
     private func forward(
         context: LLMProxyRequestContext,
-        host: String,
+        upstreamBase: URL,
         state: ProxyConnectionState
     ) {
-        guard let url = URL(string: "https://\(host)\(context.path)") else {
+        guard let url = Self.combineUpstream(base: upstreamBase, requestTarget: context.path) else {
             respondLocally(
                 state: state,
                 status: 502,
@@ -378,6 +385,20 @@ public final class LLMProxyServer: @unchecked Sendable {
         state.connection.send(content: packet, isComplete: true, completion: .contentProcessed { _ in
             state.connection.cancel()
         })
+    }
+
+    /// Concatenate the upstream base URL with the inbound request-target.
+    /// Both `https://api.openai.com` + `/v1/responses` and
+    /// `https://api2.tabcode.cc/openai/plus` + `/v1/responses` need to
+    /// produce sensible URLs. We trim a trailing slash off the base,
+    /// ensure the request target starts with one, and concat as
+    /// strings — the request-target already includes any query string
+    /// verbatim from the wire, so URLComponents would just complicate.
+    static func combineUpstream(base: URL, requestTarget: String) -> URL? {
+        var baseString = base.absoluteString
+        if baseString.hasSuffix("/") { baseString.removeLast() }
+        let suffix = requestTarget.hasPrefix("/") ? requestTarget : "/" + requestTarget
+        return URL(string: baseString + suffix)
     }
 
     static func reasonPhrase(for status: Int) -> String {

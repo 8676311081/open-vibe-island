@@ -6,6 +6,9 @@ struct LLMSpendSettingsPane: View {
     var model: AppModel
 
     @State private var portFieldText: String = ""
+    @State private var openAIUpstreamText: String = ""
+    @State private var anthropicUpstreamText: String = ""
+    @State private var upstreamErrorKey: String?
     @State private var copiedKey: String?
 
     private var lang: LanguageManager { model.lang }
@@ -30,13 +33,16 @@ struct LLMSpendSettingsPane: View {
                     duplicateWarningSection(warning)
                 }
                 controlsSection
+                upstreamsSection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(lang.t("settings.tab.llmSpend"))
-        .onAppear { syncPortField() }
-        .onChange(of: model.llmProxyPort) { _, _ in syncPortField() }
+        .onAppear { syncFields() }
+        .onChange(of: model.llmProxyPort) { _, _ in syncFields() }
+        .onChange(of: model.llmProxyOpenAIUpstream) { _, _ in syncFields() }
+        .onChange(of: model.llmProxyAnthropicUpstream) { _, _ in syncFields() }
     }
 
     // MARK: - Sections
@@ -185,6 +191,77 @@ struct LLMSpendSettingsPane: View {
                 }
                 .disabled(portFieldText == String(model.llmProxyPort) || parsedPort() == nil)
                 Spacer()
+            }
+        }
+    }
+
+    private var upstreamsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(lang.t("settings.llmSpend.upstreams"))
+                .font(.headline)
+            Text(lang.t("settings.llmSpend.upstreamsHint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            upstreamRow(
+                label: "OpenAI",
+                placeholder: LLMProxyCoordinator.defaultOpenAIUpstream,
+                text: $openAIUpstreamText,
+                currentValue: model.llmProxyOpenAIUpstream,
+                apply: {
+                    if !model.setLLMProxyOpenAIUpstream(openAIUpstreamText) {
+                        upstreamErrorKey = "openai"
+                    } else {
+                        upstreamErrorKey = nil
+                    }
+                },
+                showError: upstreamErrorKey == "openai"
+            )
+
+            upstreamRow(
+                label: "Anthropic",
+                placeholder: LLMProxyCoordinator.defaultAnthropicUpstream,
+                text: $anthropicUpstreamText,
+                currentValue: model.llmProxyAnthropicUpstream,
+                apply: {
+                    if !model.setLLMProxyAnthropicUpstream(anthropicUpstreamText) {
+                        upstreamErrorKey = "anthropic"
+                    } else {
+                        upstreamErrorKey = nil
+                    }
+                },
+                showError: upstreamErrorKey == "anthropic"
+            )
+        }
+    }
+
+    private func upstreamRow(
+        label: String,
+        placeholder: String,
+        text: Binding<String>,
+        currentValue: URL,
+        apply: @escaping () -> Void,
+        showError: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text(label)
+                    .font(.subheadline)
+                    .frame(width: 80, alignment: .leading)
+                TextField(placeholder, text: text)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .onSubmit(apply)
+                Button(lang.t("settings.llmSpend.applyPort"), action: apply)
+                    .disabled(text.wrappedValue.trimmingCharacters(in: .whitespaces) == currentValue.absoluteString
+                              || text.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if showError {
+                Text(lang.t("settings.llmSpend.upstreamInvalid"))
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(.leading, 90)
             }
         }
     }
@@ -356,8 +433,10 @@ struct LLMSpendSettingsPane: View {
         model.setLLMProxyPort(port)
     }
 
-    private func syncPortField() {
+    private func syncFields() {
         portFieldText = String(model.llmProxyPort)
+        openAIUpstreamText = model.llmProxyOpenAIUpstream.absoluteString
+        anthropicUpstreamText = model.llmProxyAnthropicUpstream.absoluteString
     }
 }
 

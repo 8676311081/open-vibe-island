@@ -252,3 +252,6 @@
 "settings.llmSpend.copied" = "Copied";
 "settings.llmSpend.unpriced" = "—";
 "settings.llmSpend.unpricedTooltip" = "Some turns used a model not in the pricing table; tokens counted but cost unknown.";
+"settings.llmSpend.upstreams" = "Upstream URLs";
+"settings.llmSpend.upstreamsHint" = "Override these to forward through an OpenAI- or Anthropic-compatible gateway (e.g. tabcode, OpenRouter, a self-hosted vllm). Empty = use the official endpoint.";
+"settings.llmSpend.upstreamInvalid" = "Must be a complete http/https URL with a host.";

@@ -113,6 +113,44 @@ struct LLMPricingTests {
     }
 }
 
+struct LLMProxyUpstreamCombineTests {
+    @Test
+    func directProviderConcat() {
+        let url = LLMProxyServer.combineUpstream(
+            base: URL(string: "https://api.openai.com")!,
+            requestTarget: "/v1/chat/completions"
+        )
+        #expect(url?.absoluteString == "https://api.openai.com/v1/chat/completions")
+    }
+
+    @Test
+    func gatewayWithPathPrefixConcat() {
+        let url = LLMProxyServer.combineUpstream(
+            base: URL(string: "https://api2.tabcode.cc/openai/plus")!,
+            requestTarget: "/v1/responses"
+        )
+        #expect(url?.absoluteString == "https://api2.tabcode.cc/openai/plus/v1/responses")
+    }
+
+    @Test
+    func trailingSlashOnBaseTrimmed() {
+        let url = LLMProxyServer.combineUpstream(
+            base: URL(string: "https://example.com/gw/")!,
+            requestTarget: "/v1/messages"
+        )
+        #expect(url?.absoluteString == "https://example.com/gw/v1/messages")
+    }
+
+    @Test
+    func queryStringOnRequestTargetPreserved() {
+        let url = LLMProxyServer.combineUpstream(
+            base: URL(string: "https://api.openai.com")!,
+            requestTarget: "/v1/responses?stream=true"
+        )
+        #expect(url?.absoluteString == "https://api.openai.com/v1/responses?stream=true")
+    }
+}
+
 struct LLMRequestRewriterTests {
     @Test
     func nonStreamingRequestNotTouched() {
