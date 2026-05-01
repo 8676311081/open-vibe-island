@@ -266,6 +266,54 @@ struct LLMStatsStoreTests {
     }
 
     @Test
+    func cacheBreakdownIsRecorded() async {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = LLMStatsStore(url: tmp)
+        let usage = TokenUsage(input: 200, cacheWrite: 100, cacheRead: 700, output: 50)
+        await store.recordRequestCompletion(
+            date: Date(), client: .claudeCode, usage: usage, costUsd: 0.10
+        )
+        let snap = await store.currentSnapshot()
+        let bucket = snap.days.values.first?[LLMClient.claudeCode.rawValue]
+        #expect(bucket?.tokensIn == 1000)
+        #expect(bucket?.cacheReadTokens == 700)
+        #expect(bucket?.cacheCreationTokens == 100)
+    }
+
+    @Test
+    func legacySnapshotWithoutCacheFieldsDecodesAsZero() throws {
+        // Simulates a snapshot file written before cacheReadTokens /
+        // cacheCreationTokens existed: missing keys must default to 0.
+        let json = """
+        {
+          "version": 1,
+          "days": {
+            "2026-01-01": {
+              "claude-code": {
+                "turns": 5,
+                "tokensIn": 1000,
+                "tokensOut": 200,
+                "costUsd": 0.5,
+                "unpricedTurns": 0,
+                "duplicateToolCalls": 0
+              }
+            }
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snap = try decoder.decode(LLMStatsSnapshot.self, from: Data(json.utf8))
+        let bucket = snap.days["2026-01-01"]?[LLMClient.claudeCode.rawValue]
+        #expect(bucket?.turns == 5)
+        #expect(bucket?.tokensIn == 1000)
+        #expect(bucket?.cacheReadTokens == 0)
+        #expect(bucket?.cacheCreationTokens == 0)
+    }
+
+    @Test
     func unpricedTurnsBumpedWhenCostNil() async {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("llm-stats-test-\(UUID().uuidString).json")

@@ -10,6 +10,7 @@ struct LLMSpendSettingsPane: View {
     @State private var anthropicUpstreamText: String = ""
     @State private var upstreamErrorKey: String?
     @State private var copiedKey: String?
+    @State private var showStatsSheet: Bool = false
 
     private var lang: LanguageManager { model.lang }
 
@@ -21,6 +22,7 @@ struct LLMSpendSettingsPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
+                detailedStatsButton
                 header
                 statusRow
                 if showOnboarding {
@@ -43,6 +45,24 @@ struct LLMSpendSettingsPane: View {
         .onChange(of: model.llmProxyPort) { _, _ in syncFields() }
         .onChange(of: model.llmProxyOpenAIUpstream) { _, _ in syncFields() }
         .onChange(of: model.llmProxyAnthropicUpstream) { _, _ in syncFields() }
+        .sheet(isPresented: $showStatsSheet) {
+            LLMSpendStatsView(model: model)
+        }
+    }
+
+    private var detailedStatsButton: some View {
+        HStack {
+            Spacer()
+            Button {
+                showStatsSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.bar.xaxis")
+                    Text(lang.t("settings.llmSpend.viewDetailedStats"))
+                }
+            }
+            .controlSize(.regular)
+        }
     }
 
     // MARK: - Sections
