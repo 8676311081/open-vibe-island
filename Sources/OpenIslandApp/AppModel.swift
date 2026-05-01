@@ -54,6 +54,7 @@ final class AppModel {
     let discovery = SessionDiscoveryCoordinator()
     let monitoring = ProcessMonitoringCoordinator()
     let updateChecker = UpdateChecker()
+    let llmProxy = LLMProxyCoordinator()
 
     var notchStatus: NotchStatus {
         get { overlay.notchStatus }
@@ -567,6 +568,7 @@ final class AppModel {
         }
 
         refreshOverlayDisplayConfiguration()
+        llmProxy.start()
         hasFinishedInit = true
     }
 

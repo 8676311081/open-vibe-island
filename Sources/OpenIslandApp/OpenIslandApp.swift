@@ -83,6 +83,10 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        model.llmProxy.stop()
+    }
+
     private static func hideAllAppWindows() {
         for window in NSApp.windows where !window.className.contains("MenuBarExtra") {
             window.orderOut(nil)
