@@ -98,6 +98,10 @@ public actor LLMUsageObserver: LLMProxyObserver {
         }
 
         let cost = LLMPricing.costUSD(model: state.model, usage: usage)
+        // [TEMP-DIAG] Surface the upstream-reported model + pricing state so
+        // we can see why some turns end up unpriced. Remove once the
+        // pricing table covers the missing variant.
+        Self.logger.info("turn diag: client=\(String(describing: state.client), privacy: .public) model=\(state.model ?? "(nil)", privacy: .public) priced=\(cost != nil) usage_in=\(usage.input) cw=\(usage.cacheWrite) cr=\(usage.cacheRead) out=\(usage.output)")
         if usage != .zero || !toolUses.isEmpty {
             await store.recordRequestCompletion(
                 date: context.receivedAt,
