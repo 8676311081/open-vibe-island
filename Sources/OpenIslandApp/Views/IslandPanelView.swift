@@ -431,12 +431,15 @@ struct IslandPanelView: View {
         HStack(spacing: Self.headerControlSpacing) {
             if let spendLabel = todayLLMSpendLabel {
                 Button(action: { model.openLLMSpend() }) {
-                    Text(spendLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .padding(.horizontal, 8)
-                        .frame(height: Self.headerControlButtonSize)
-                        .background(.white.opacity(0.08), in: Capsule())
+                    HStack(spacing: 5) {
+                        Text(spendLabel)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                        contextFillBar
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: Self.headerControlButtonSize)
+                    .background(.white.opacity(0.08), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .help("Today's LLM spend — click for breakdown")
@@ -457,6 +460,48 @@ struct IslandPanelView: View {
                 model.showSettings()
             }
         }
+    }
+
+    /// Compact context-fill bar shown next to the spend pill text.
+    /// Width is fixed (24pt) so the pill doesn't reflow as the
+    /// ratio changes. Color follows the same 60/85% thresholds the
+    /// stats banner uses (`LLMSpendStatsView.contextFillWarn/
+    /// CriticalThreshold`). Returns an empty space (zero-size) when
+    /// no client has fill data yet — keeps the pill dimensions
+    /// stable instead of jumping when the first usage event lands.
+    @ViewBuilder
+    private var contextFillBar: some View {
+        if let ratio = highestContextFillRatio() {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                Capsule()
+                    .fill(Self.contextFillBarColor(ratio: ratio))
+                    .frame(width: max(2, 24 * ratio))
+            }
+            .frame(width: 24, height: 4)
+        }
+    }
+
+    private func highestContextFillRatio() -> Double? {
+        var best: Double?
+        for ratio in model.llmContextFill.values {
+            if best == nil || ratio > best! { best = ratio }
+        }
+        return best
+    }
+
+    /// Color for the pill's context-fill bar. Pulled out as a static
+    /// helper because `@ViewBuilder` rejects inline `if-let / let
+    /// color: Color = { ... }` reassignment patterns.
+    private static func contextFillBarColor(ratio: Double) -> Color {
+        if ratio >= LLMSpendStatsView.contextFillCriticalThreshold {
+            return Color.red.opacity(0.9)
+        }
+        if ratio >= LLMSpendStatsView.contextFillWarnThreshold {
+            return Color.orange.opacity(0.9)
+        }
+        return Color.white.opacity(0.55)
     }
 
     /// Today's accumulated LLM spend, formatted as a short pill — or nil

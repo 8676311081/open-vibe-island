@@ -225,6 +225,13 @@ public actor LLMStatsStore {
     public let url: URL
     private(set) var snapshot: LLMStatsSnapshot
     private var recentToolUses: [ToolUseRecord] = []
+    /// Per-client most-recent context fill ratio (0.0…1.0).
+    /// **In-memory only** — never persisted. Resets to empty on
+    /// every app restart, which is correct: this is a "right now"
+    /// signal driving the pill/banner colors, not historical
+    /// analytics. Keys are present only when we have an upstream
+    /// usage event AND a known context limit for the model.
+    private var contextFillByClient: [LLMClient: Double] = [:]
 
     private struct ToolUseRecord {
         let client: LLMClient
@@ -318,6 +325,21 @@ public actor LLMStatsStore {
         let key = Self.dayKey(for: date)
         snapshot.days.removeValue(forKey: key)
         persist()
+    }
+
+    // MARK: - Context fill (in-memory, not persisted)
+
+    /// Record the latest seen context fill ratio for a client. Called
+    /// by `LLMUsageObserver` once per request, after the upstream's
+    /// `message_start` (Anthropic) / equivalent first-usage event has
+    /// landed. Caller is responsible for clamping to `[0, 1]`.
+    public func recordContextFill(client: LLMClient, ratio: Double) {
+        contextFillByClient[client] = ratio
+    }
+
+    /// Snapshot of all clients with a recorded fill ratio.
+    public func currentContextFills() -> [LLMClient: Double] {
+        contextFillByClient
     }
 
     /// Replace the cross-client compression summary. Called by

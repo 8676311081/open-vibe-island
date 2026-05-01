@@ -67,6 +67,14 @@ final class AppModel {
     /// that views observe.
     var llmStatsSnapshot = LLMStatsSnapshot()
 
+    /// Per-client context fill ratio (0.0…1.0), refreshed alongside
+    /// `llmStatsSnapshot`. Sourced from `LLMStatsStore`'s in-memory
+    /// `contextFillByClient` map — never persisted, always reset on
+    /// app restart. Empty when no upstream has streamed a usage
+    /// envelope yet, or when no model in the active client matched
+    /// `ModelContextLimits`.
+    var llmContextFill: [LLMClient: Double] = [:]
+
     @ObservationIgnored
     private var llmStatsRefreshTask: Task<Void, Never>?
 
@@ -647,7 +655,9 @@ final class AppModel {
             // Initial fetch is synchronous-ish; subsequent ones poll.
             while !Task.isCancelled {
                 let snapshot = await store.currentSnapshot()
+                let fills = await store.currentContextFills()
                 self?.llmStatsSnapshot = snapshot
+                self?.llmContextFill = fills
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
         }
@@ -655,7 +665,9 @@ final class AppModel {
 
     private func refreshLLMStatsSnapshotOnce() async {
         let snapshot = await llmProxy.statsStore.currentSnapshot()
+        let fills = await llmProxy.statsStore.currentContextFills()
         self.llmStatsSnapshot = snapshot
+        self.llmContextFill = fills
     }
 
     var sessions: [AgentSession] {

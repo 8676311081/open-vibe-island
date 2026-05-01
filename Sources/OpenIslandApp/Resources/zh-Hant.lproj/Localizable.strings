@@ -247,6 +247,9 @@
 "settings.llmSpend.stats.axisDay" = "日期";
 "settings.llmSpend.stats.cacheHitLegacyTooltip" = "2026 年 5 月 1 日之前的流量未記錄快取分解，無法計算命中率。";
 "settings.llmSpend.stats.colWasted" = "浪費";
+"settings.llmSpend.stats.contextFillWarning" = "接近上下文上限";
+"settings.llmSpend.stats.contextFillCritical" = "上下文即將佔滿 — 建議 /clear 或開新會話";
+"settings.llmSpend.stats.contextFillSubtitle" = "本輪已使用模型上下文視窗的 %d%%。";
 "settings.llmSpend.stats.wastedTooltip" = "本用戶端為模型未呼叫的工具 schema 支付的估計 tokens 總數。範圍內累加。僅近似——使用 CJK 感知的字元比例估算，非上游 tokenizer。";
 "settings.llmSpend.stats.cardSavedByCompression" = "壓縮節省";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "RTK 跨所有 AI 編碼用戶端從 Bash 輸出中剝除的累計 tokens。資料來源 rtk gain。";

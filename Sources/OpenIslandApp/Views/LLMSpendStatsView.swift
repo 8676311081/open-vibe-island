@@ -48,6 +48,7 @@ struct LLMSpendStatsView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    contextFillBanner
                     rangePicker
                     if rangeData.isEmpty {
                         emptyState
@@ -61,6 +62,58 @@ struct LLMSpendStatsView: View {
             }
         }
         .frame(minWidth: 760, idealWidth: 820, minHeight: 600, idealHeight: 680)
+    }
+
+    // MARK: - Context fill banner (60% / 85% thresholds)
+
+    /// Thresholds for the banner color/visibility. Shared with
+    /// `IslandPanelView`'s pill progress bar so the two surfaces
+    /// can't disagree on what "yellow" means.
+    static let contextFillWarnThreshold: Double = 0.60
+    static let contextFillCriticalThreshold: Double = 0.85
+
+    @ViewBuilder
+    private var contextFillBanner: some View {
+        // Render the banner for whichever client is closest to its
+        // limit. Skipped when no client has crossed 60% (or no
+        // upstream has streamed a usage envelope yet).
+        if let (_, ratio) = highestContextFill(), ratio >= Self.contextFillWarnThreshold {
+            let isCritical = ratio >= Self.contextFillCriticalThreshold
+            let color = isCritical ? Color.red : Color.orange
+            let labelKey = isCritical
+                ? "settings.llmSpend.stats.contextFillCritical"
+                : "settings.llmSpend.stats.contextFillWarning"
+            HStack(spacing: 10) {
+                Image(systemName: isCritical ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(color)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lang.t(labelKey))
+                        .font(.subheadline.weight(.semibold))
+                    Text(String(
+                        format: lang.t("settings.llmSpend.stats.contextFillSubtitle"),
+                        Int((ratio * 100).rounded())
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    /// Greatest fill ratio seen across all clients. Returns `nil`
+    /// when nothing's been recorded yet (fresh app, or active
+    /// model isn't in `ModelContextLimits`).
+    private func highestContextFill() -> (LLMClient, Double)? {
+        var best: (LLMClient, Double)?
+        for (client, ratio) in model.llmContextFill {
+            if best == nil || ratio > best!.1 {
+                best = (client, ratio)
+            }
+        }
+        return best
     }
 
     // MARK: - Toolbar

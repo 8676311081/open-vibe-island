@@ -64,7 +64,35 @@ public actor LLMUsageObserver: LLMProxyObserver {
                 state.bodyAccumulator.append(chunk)
             }
         }
+        // Push context fill once per request, as soon as the first
+        // usage envelope lands (message_start for Anthropic SSE,
+        // initial usage block for OpenAI). Skipped silently when the
+        // model isn't in `ModelContextLimits.table` — UI shows "—"
+        // rather than a fabricated ratio.
+        //
+        // Order matters: flip the flag and write the state back into
+        // `inFlight` BEFORE `await store.recordContextFill`. The
+        // await yields the actor; if `didCompleteWithError` lands in
+        // between (race observed in `LLMProxyServerIntegrationTests`)
+        // it removes our entry from `inFlight` to do the final
+        // `recordRequestCompletion` — and re-writing `state` after
+        // the await would resurrect a stale copy and erase that
+        // completion path's effect.
+        var pendingPush: (LLMClient, Double)?
+        if !state.contextFillPushed,
+           let model = state.model,
+           let limit = ModelContextLimits.maxContextTokens(forModel: model) {
+            let totalIn = state.usage.input + state.usage.cacheWrite + state.usage.cacheRead
+            if totalIn > 0 {
+                let ratio = min(1.0, Double(totalIn) / Double(limit))
+                state.contextFillPushed = true
+                pendingPush = (state.client, ratio)
+            }
+        }
         inFlight[context.id] = state
+        if let (client, ratio) = pendingPush {
+            await store.recordContextFill(client: client, ratio: ratio)
+        }
     }
 
     public func proxy(
@@ -196,5 +224,8 @@ public actor LLMUsageObserver: LLMProxyObserver {
         var bodyAccumulator = Data()
         var usage = TokenUsage.zero
         var toolUses: [(name: String, inputHash: String)] = []
+        /// Once-per-request flag so we push context fill exactly
+        /// once — the first chunk that landed a usage envelope.
+        var contextFillPushed = false
     }
 }

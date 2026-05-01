@@ -278,6 +278,9 @@
 "settings.llmSpend.stats.axisDay" = "Day";
 "settings.llmSpend.stats.cacheHitLegacyTooltip" = "Cache breakdown unavailable for traffic recorded before May 1, 2026.";
 "settings.llmSpend.stats.colWasted" = "Wasted";
+"settings.llmSpend.stats.contextFillWarning" = "Approaching context limit";
+"settings.llmSpend.stats.contextFillCritical" = "Context near full — consider /clear or starting a new session";
+"settings.llmSpend.stats.contextFillSubtitle" = "%d%% of the model's context window is in use this turn.";
 "settings.llmSpend.stats.wastedTooltip" = "Estimated tokens this client paid to ship as tool schemas the model never invoked. Sum across the selected range. Approximate — uses a CJK-aware char-ratio estimator, not the upstream tokenizer.";
 "settings.llmSpend.stats.cardSavedByCompression" = "Saved by compression";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "Cumulative tokens RTK has stripped from Bash tool output across all your AI coding agents. Sourced from rtk gain.";
