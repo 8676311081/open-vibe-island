@@ -74,11 +74,26 @@ public enum LLMPricing {
             cacheReadPerMTok: 0.30,
             outputPerMTok: 15.00
         ),
+        "claude-sonnet-4-6": ModelPricing(
+            inputPerMTok: 3.00,
+            cacheWritePerMTok: 3.75,
+            cacheReadPerMTok: 0.30,
+            outputPerMTok: 15.00
+        ),
+        // Opus 4.x has been at $5/$25 since Opus 4.5's 67% cut — not
+        // the historical $15/$75 of Opus 3. Same rate carries through
+        // 4.6 and 4.7.
         "claude-opus-4-6": ModelPricing(
-            inputPerMTok: 15.00,
-            cacheWritePerMTok: 18.75,
-            cacheReadPerMTok: 1.50,
-            outputPerMTok: 75.00
+            inputPerMTok: 5.00,
+            cacheWritePerMTok: 6.25,
+            cacheReadPerMTok: 0.50,
+            outputPerMTok: 25.00
+        ),
+        "claude-opus-4-7": ModelPricing(
+            inputPerMTok: 5.00,
+            cacheWritePerMTok: 6.25,
+            cacheReadPerMTok: 0.50,
+            outputPerMTok: 25.00
         ),
         "claude-haiku-4-5": ModelPricing(
             inputPerMTok: 1.00,
