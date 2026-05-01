@@ -97,7 +97,10 @@ public final class LLMProxyServer: @unchecked Sendable {
     private let session: URLSession
     private let sessionDelegate: ProxyURLSessionDelegate
 
-    public init(configuration: LLMProxyConfiguration = .default) {
+    public init(
+        configuration: LLMProxyConfiguration = .default,
+        additionalProtocolClasses: [AnyClass] = []
+    ) {
         self.configuration = configuration
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -105,12 +108,45 @@ public final class LLMProxyServer: @unchecked Sendable {
         cfg.timeoutIntervalForResource = 3600   // ditto
         cfg.httpAdditionalHeaders = nil
         cfg.urlCache = nil
+        // Test injection point: a URLProtocol subclass placed at the
+        // head of `protocolClasses` intercepts every outbound request
+        // *before* it reaches the network. Production code never sets
+        // this — it stays an empty array and the OS default chain
+        // (HTTP/HTTPS/etc.) handles upstream traffic unmodified.
+        if !additionalProtocolClasses.isEmpty {
+            cfg.protocolClasses = additionalProtocolClasses + (cfg.protocolClasses ?? [])
+        }
         let delegate = ProxyURLSessionDelegate()
         self.sessionDelegate = delegate
         self.session = URLSession(
             configuration: cfg,
             delegate: delegate,
             delegateQueue: nil
+        )
+    }
+
+    /// Bound port after `start()`, available once the listener has
+    /// transitioned to `.ready`. Tests use this to discover the
+    /// kernel-assigned port when `configuration.port == 0`. Returns
+    /// `nil` before the listener is ready or after `stop()`.
+    public var actualPort: UInt16? {
+        listener?.port?.rawValue
+    }
+
+    /// Block (asynchronously) until the listener has bound a port.
+    /// Polls every 20 ms; throws after `timeout` seconds. Test helper.
+    public func waitUntilReady(timeout: TimeInterval = 5) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let port = actualPort, port > 0 {
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        throw NSError(
+            domain: "app.openisland.llm-proxy",
+            code: -2,
+            userInfo: [NSLocalizedDescriptionKey: "listener did not become ready within \(timeout)s"]
         )
     }
 
@@ -122,14 +158,22 @@ public final class LLMProxyServer: @unchecked Sendable {
         let params = NWParameters.tcp
         params.acceptLocalOnly = true
         params.requiredInterfaceType = .loopback
-        guard let port = NWEndpoint.Port(rawValue: configuration.port) else {
-            throw NSError(
-                domain: "app.openisland.llm-proxy",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid port \(configuration.port)"]
-            )
+        let listener: NWListener
+        if configuration.port == 0 {
+            // Kernel-assigned ephemeral port — used by integration
+            // tests so they don't fight over the production 9710.
+            // `actualPort` exposes the bound value once ready.
+            listener = try NWListener(using: params)
+        } else {
+            guard let port = NWEndpoint.Port(rawValue: configuration.port) else {
+                throw NSError(
+                    domain: "app.openisland.llm-proxy",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid port \(configuration.port)"]
+                )
+            }
+            listener = try NWListener(using: params, on: port)
         }
-        let listener = try NWListener(using: params, on: port)
         listener.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
