@@ -2,6 +2,18 @@
 
 set -euo pipefail
 
+# Refuse to launch if production Open Island.app is also running.
+# Both bundles compile to the same binary name "OpenIslandApp", so
+# AppleScript queries via `tell process "OpenIslandApp"` resolve to
+# whichever process AppleScript finds first — typically the older one,
+# making AX-based smoke tests report stale UI as if it were the dev
+# build's. Wasted >2h of investigation 2026-05 chasing a phantom
+# regression caused by exactly this collision.
+if pgrep -f '/Applications/Open Island.app/Contents/MacOS/OpenIslandApp' >/dev/null 2>&1; then
+    echo "ERROR: Production Open Island.app is running. Quit it first." >&2
+    echo "       (process names collide; AX inspections will be unreliable)" >&2
+    exit 1
+fi
 
 skip_setup=false
 for arg in "$@"; do
