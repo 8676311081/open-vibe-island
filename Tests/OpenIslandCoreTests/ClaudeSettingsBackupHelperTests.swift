@@ -273,4 +273,189 @@ struct ClaudeSettingsBackupHelperTests {
         // After the trailing `\\` string ends; the next `"c" :` flushed.
         #expect(normalized.contains(#""c": "#))
     }
+
+    // MARK: - File-lock coverage
+    //
+    // Six cases: serial baseline, concurrent producers, cross-process
+    // blocking, contention timeout, first-run lock-file creation, and
+    // lock-file inode persistence. Cross-process tests shell out to the
+    // bundled macOS `/usr/bin/python3` (always present on macOS 12+);
+    // they're the only way to hold flock from a separate process and
+    // observe blocking from Swift.
+
+    @Test
+    func serialBaseline100MutationsAllPersist() throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for i in 0..<100 {
+            try ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dir) { settings in
+                settings["count"] = i
+            }
+        }
+
+        let final = try ClaudeSettingsBackupHelper.currentSettings(directory: dir)
+        #expect((final["count"] as? Int) == 99)
+    }
+
+    @Test
+    func concurrent30MutationsAllEditsPersist() async throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Sendable bridge: tasks need the URL value, not a captured ref.
+        let dirCopy = dir
+
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0..<30 {
+                group.addTask {
+                    _ = try? ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dirCopy) { settings in
+                        settings["key_\(i)"] = i
+                    }
+                }
+            }
+        }
+
+        let final = try ClaudeSettingsBackupHelper.currentSettings(directory: dir)
+        for i in 0..<30 {
+            #expect(final["key_\(i)"] as? Int == i, "missing key_\(i) under concurrency — lock failed")
+        }
+    }
+
+    @Test
+    func crossProcessLockBlocksMainThread() async throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let lockPath = dir.appendingPathComponent("settings.json.lock").path
+        FileManager.default.createFile(atPath: lockPath, contents: nil)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        proc.arguments = ["-c", """
+            import fcntl, sys, time
+            f = open('\(lockPath)', 'rb+')
+            fcntl.flock(f, fcntl.LOCK_EX)
+            sys.stdout.write('locked\\n'); sys.stdout.flush()
+            time.sleep(0.6)
+            """]
+        let stdoutPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        try proc.run()
+
+        let handle = stdoutPipe.fileHandleForReading
+        var output = ""
+        let waitStart = Date()
+        while !output.contains("locked") {
+            #expect(Date().timeIntervalSince(waitStart) < 5, "python helper never reported 'locked'")
+            let chunk = handle.availableData
+            if chunk.isEmpty { try await Task.sleep(nanoseconds: 10_000_000); continue }
+            output += String(data: chunk, encoding: .utf8) ?? ""
+        }
+
+        let mutateStart = Date()
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dir) { settings in
+            settings["x"] = 1
+        }
+        let elapsed = Date().timeIntervalSince(mutateStart)
+
+        proc.waitUntilExit()
+
+        #expect(elapsed >= 0.4, "mutate should have blocked on cross-process lock; elapsed=\(elapsed)s")
+        let final = try ClaudeSettingsBackupHelper.currentSettings(directory: dir)
+        #expect(final["x"] as? Int == 1)
+    }
+
+    @Test
+    func contentionTimeoutThrowsLockContention() async throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let lockPath = dir.appendingPathComponent("settings.json.lock").path
+        FileManager.default.createFile(atPath: lockPath, contents: nil)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        proc.arguments = ["-c", """
+            import fcntl, sys, time
+            f = open('\(lockPath)', 'rb+')
+            fcntl.flock(f, fcntl.LOCK_EX)
+            sys.stdout.write('locked\\n'); sys.stdout.flush()
+            time.sleep(1.5)
+            """]
+        let stdoutPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        try proc.run()
+
+        let handle = stdoutPipe.fileHandleForReading
+        var output = ""
+        let waitStart = Date()
+        while !output.contains("locked") {
+            #expect(Date().timeIntervalSince(waitStart) < 5, "python helper never reported 'locked'")
+            let chunk = handle.availableData
+            if chunk.isEmpty { try await Task.sleep(nanoseconds: 10_000_000); continue }
+            output += String(data: chunk, encoding: .utf8) ?? ""
+        }
+
+        // Short timeout; python holds for 1.5 s so this must time out.
+        var thrown: Error?
+        do {
+            try ClaudeSettingsBackupHelper.mutateClaudeSettings(
+                directory: dir,
+                lockTimeout: 0.3
+            ) { settings in
+                settings["should_not_land"] = true
+            }
+        } catch {
+            thrown = error
+        }
+
+        proc.waitUntilExit()
+
+        if let backupError = thrown as? ClaudeSettingsBackupError,
+           case .lockContention = backupError {
+            // expected
+        } else {
+            Issue.record("expected ClaudeSettingsBackupError.lockContention, got \(String(describing: thrown))")
+        }
+        // settings.json should never have been written.
+        let final = try ClaudeSettingsBackupHelper.currentSettings(directory: dir)
+        #expect((final["should_not_land"] as? Bool) == nil)
+    }
+
+    @Test
+    func firstRunCreatesLockFile() throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let lockURL = dir.appendingPathComponent("settings.json.lock")
+        #expect(!FileManager.default.fileExists(atPath: lockURL.path), "lock file should not exist before first mutate")
+
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dir) { settings in
+            settings["k"] = "v"
+        }
+
+        #expect(FileManager.default.fileExists(atPath: lockURL.path), "lock file should be auto-created on first mutate")
+    }
+
+    @Test
+    func lockFilePersistsWithSameInodeAcrossInvocations() throws {
+        let dir = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dir) { s in
+            s["a"] = 1
+        }
+        let lockURL = dir.appendingPathComponent("settings.json.lock")
+        let attrs1 = try FileManager.default.attributesOfItem(atPath: lockURL.path)
+        let inode1 = attrs1[.systemFileNumber] as? UInt64
+
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(directory: dir) { s in
+            s["b"] = 2
+        }
+        let attrs2 = try FileManager.default.attributesOfItem(atPath: lockURL.path)
+        let inode2 = attrs2[.systemFileNumber] as? UInt64
+
+        #expect(inode1 != nil, "could not read lock file inode after first mutate")
+        #expect(inode1 == inode2, "lock file should be reused (same inode), not recreated; got \(inode1 ?? 0) vs \(inode2 ?? 0)")
+    }
 }
