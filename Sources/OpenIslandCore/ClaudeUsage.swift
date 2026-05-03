@@ -1,3 +1,13 @@
+// Why this file is read-only and never written from inside Open Island:
+// `/tmp/open-island-rl.json` is fed exclusively by Claude Code's
+// interactive-statusline pipeline. Print mode (`claude -p`), stream-json
+// hooks, debug-file, and even PTY-wrapped sessions with faked
+// `TERM_PROGRAM=iTerm.app` do not trigger the statusline (verified
+// empirically). Don't add background pollers that spawn `claude` to
+// "refresh" this cache — they cannot work, and they will burn Anthropic
+// quota in the attempt. See docs/usage-freshness-investigation.md
+// before reopening this question.
+
 import Foundation
 
 public struct ClaudeUsageWindow: Equatable, Codable, Sendable {
