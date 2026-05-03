@@ -55,6 +55,10 @@ final class LLMProxyCoordinator {
         let store = LLMStatsStore()
         self.statsStore = store
         self.usageObserver = LLMUsageObserver(store: store)
+        // Feed the profile resolver to the observer so the pricing
+        // fallback path can read ProfileCostMetadata for models not
+        // in the static LLMPricing table (e.g. deepseek-v4-pro).
+        self.usageObserver.profileResolver = profiles
     }
 
     static func makeConfiguration() -> LLMProxyConfiguration {

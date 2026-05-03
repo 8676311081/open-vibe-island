@@ -149,6 +149,50 @@ public enum LLMPricing {
     /// real provider pricing.
     public static func costUSD(model: String?, usage: TokenUsage) -> Double? {
         guard let p = priceFor(model: model) else { return nil }
+        return computeCost(p, usage: usage)
+    }
+
+    /// Resolver-aware overload. Checks the static table first; on
+    /// miss, looks up the active `UpstreamProfile` for a matching
+    /// `modelOverride` and uses its `ProfileCostMetadata` for pricing.
+    /// This bridges the gap between the static Anthropic/OpenAI rows
+    /// and the profile-driven DeepSeek / future-provider rows —
+    /// without duplicating the discount-expiry logic in this file.
+    ///
+    /// Profile cost metadata is the single source of truth for all
+    /// non-static-table providers. When a profile goes through a
+    /// discount window (e.g. DeepSeek V4 75% off → list price after
+    /// 2026-05-31), the metadata's `effectiveInputPrice` gate handles
+    /// the switchover automatically — no code update needed.
+    public static func costUSD(
+        model: String?,
+        usage: TokenUsage,
+        profileResolver: (any UpstreamProfileResolver)?
+    ) -> Double? {
+        if let p = priceFor(model: model) {
+            return computeCost(p, usage: usage)
+        }
+        guard let resolver = profileResolver, let model, !model.isEmpty else {
+            return nil
+        }
+        // Reverse-lookup: find a profile whose modelOverride equals
+        // the model id the body rewriter substituted. This is a two-
+        // entry walk for the current built-in set (anthropic-native
+        // has nil modelOverride, so the only hits are DSV4P/Flash).
+        let active = resolver.currentActiveProfile()
+        guard active.modelOverride == model || active.id == model,
+              let meta = active.costMetadata else {
+            return nil
+        }
+        return meta.costUSD(
+            inputTokens: usage.input + usage.cacheWrite,
+            outputTokens: usage.output,
+            cacheReadTokens: usage.cacheRead,
+            now: Date()
+        )
+    }
+
+    private static func computeCost(_ p: ModelPricing, usage: TokenUsage) -> Double {
         let scale = 1_000_000.0
         return Double(usage.input) * p.inputPerMTok / scale
             + Double(usage.cacheWrite) * p.cacheWritePerMTok / scale

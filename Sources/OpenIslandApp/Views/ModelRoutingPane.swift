@@ -88,31 +88,20 @@ public enum ModelRoutingDerivation {
         }
     }
 
-    /// Effective input price to display on a card. After the
-    /// discount window expires, fall back to the pre-discount
-    /// list price (so the card stays accurate even if no new
-    /// release has shipped to bump `inputUSDPerMtok`). 0 list
-    /// price means "no list price was filed" — keep current.
+    /// Delegate to `ProfileCostMetadata.effectiveInputPrice(now:)`
+    /// which lives in Core so the pricing pipeline can use it too.
     public static func effectiveInputPrice(
         metadata: ProfileCostMetadata,
         now: Date
     ) -> Double {
-        if discountState(metadata: metadata, now: now) == .expired,
-           metadata.listInputUSDPerMtok > 0 {
-            return metadata.listInputUSDPerMtok
-        }
-        return metadata.inputUSDPerMtok
+        metadata.effectiveInputPrice(now: now)
     }
 
     public static func effectiveOutputPrice(
         metadata: ProfileCostMetadata,
         now: Date
     ) -> Double {
-        if discountState(metadata: metadata, now: now) == .expired,
-           metadata.listOutputUSDPerMtok > 0 {
-            return metadata.listOutputUSDPerMtok
-        }
-        return metadata.outputUSDPerMtok
+        metadata.effectiveOutputPrice(now: now)
     }
 }
 

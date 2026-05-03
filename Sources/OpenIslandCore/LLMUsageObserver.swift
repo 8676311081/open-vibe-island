@@ -18,6 +18,13 @@ public actor LLMUsageObserver: LLMProxyObserver {
         self.store = store
     }
 
+    /// Optional: when set, the pricing fallback path queries the
+    /// active profile's `ProfileCostMetadata` for models not in the
+    /// static `LLMPricing.table` (e.g. DeepSeek V4 Pro/Flash after
+    /// body model rewrite produces `deepseek-v4-pro`). Nil for
+    /// existing test setups that don't wire routing.
+    public nonisolated(unsafe) var profileResolver: (any UpstreamProfileResolver)?
+
     // MARK: - LLMProxyObserver
 
     public func proxyWillForward(_ context: LLMProxyRequestContext) async {
@@ -128,7 +135,11 @@ public actor LLMUsageObserver: LLMProxyObserver {
             }
         }
 
-        let cost = LLMPricing.costUSD(model: state.model, usage: usage)
+        let cost = LLMPricing.costUSD(
+            model: state.model,
+            usage: usage,
+            profileResolver: profileResolver
+        )
         // Compute waste: tools the model declared but never invoked
         // during the turn. Sum the per-tool estimate from the
         // analyzer pass at proxyWillForward time. Used names from

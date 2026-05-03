@@ -76,6 +76,52 @@ public struct ProfileCostMetadata: Codable, Sendable, Equatable {
         self.listInputUSDPerMtok = try c.decodeIfPresent(Double.self, forKey: .listInputUSDPerMtok) ?? 0
         self.listOutputUSDPerMtok = try c.decodeIfPresent(Double.self, forKey: .listOutputUSDPerMtok) ?? 0
     }
+
+    // MARK: - Cost computation
+
+    /// Effective input rate (USD/Mtok), accounting for discount expiry.
+    /// When the discount window has closed AND a list price was
+    /// supplied, returns the list price; otherwise returns the
+    /// nominal `inputUSDPerMtok`.
+    public func effectiveInputPrice(now: Date = Date()) -> Double {
+        if let expiresAt = discountExpiresAt, expiresAt <= now,
+           listInputUSDPerMtok > 0 {
+            return listInputUSDPerMtok
+        }
+        return inputUSDPerMtok
+    }
+
+    /// Effective output rate — same discount-gate as
+    /// `effectiveInputPrice`.
+    public func effectiveOutputPrice(now: Date = Date()) -> Double {
+        if let expiresAt = discountExpiresAt, expiresAt <= now,
+           listOutputUSDPerMtok > 0 {
+            return listOutputUSDPerMtok
+        }
+        return outputUSDPerMtok
+    }
+
+    /// Compute USD cost for a turn against this profile's pricing.
+    /// Token units are raw counts; this method divides by 1e6
+    /// internally. Callers pass `inputTokens` = request-tokens +
+    /// cache-write tokens (billed at input rate) and `cacheReadTokens`
+    /// = cache-read tokens (billed at the cache-read rate, falling
+    /// back to 0 when the provider doesn't support cache — same
+    /// nil→0 policy as the rest of the pricing pipeline).
+    public func costUSD(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int,
+        now: Date = Date()
+    ) -> Double {
+        let scale = 1_000_000.0
+        let inputPrice = effectiveInputPrice(now: now)
+        let outputPrice = effectiveOutputPrice(now: now)
+        let cacheReadPrice = cacheReadUSDPerMtok ?? 0
+        return Double(inputTokens) * inputPrice / scale
+            + Double(outputTokens) * outputPrice / scale
+            + Double(cacheReadTokens) * cacheReadPrice / scale
+    }
 }
 
 /// One row of the routing table. Resolves an upstream URL to:
