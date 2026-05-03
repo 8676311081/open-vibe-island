@@ -61,6 +61,14 @@ public struct TokenUsage: Sendable, Equatable, Codable, Hashable {
 
 /// Pricing reference table and helpers. The table is the *only* thing
 /// you need to update when prices change — everything else is data-driven.
+///
+/// IMPORTANT — cross-ref invariant with ModelContextLimits.swift:
+/// Any model SKU keyword added to ModelContextLimits (e.g. `[1m]`
+/// bracket variant in 709a07b) MUST also be added here with its
+/// per-Mtok pricing row. Otherwise `priceFor` returns nil → the
+/// observer records `unpricedTurns` even for known Anthropic models
+/// whose context window we accurately detect — silent cost failure.
+/// This invariant is also noted in ModelContextLimits.swift.
 public enum LLMPricing {
     /// Hardcoded reference rates (USD per million tokens). Refreshed
     /// 2026-05-01. Models below are matched via longest-prefix so
@@ -74,7 +82,23 @@ public enum LLMPricing {
             cacheReadPerMTok: 0.30,
             outputPerMTok: 15.00
         ),
+        // [1m] bracket variant — same SKU, same price, different wire
+        // id. The prefix matcher's `key + "-"` delimiter doesn't catch
+        // `[`-separated suffixes, so bracketed ids need explicit rows.
+        // Cross-ref with ModelContextLimits.swift 709a07b.
+        "claude-sonnet-4-5[1m]": ModelPricing(
+            inputPerMTok: 3.00,
+            cacheWritePerMTok: 3.75,
+            cacheReadPerMTok: 0.30,
+            outputPerMTok: 15.00
+        ),
         "claude-sonnet-4-6": ModelPricing(
+            inputPerMTok: 3.00,
+            cacheWritePerMTok: 3.75,
+            cacheReadPerMTok: 0.30,
+            outputPerMTok: 15.00
+        ),
+        "claude-sonnet-4-6[1m]": ModelPricing(
             inputPerMTok: 3.00,
             cacheWritePerMTok: 3.75,
             cacheReadPerMTok: 0.30,
@@ -89,7 +113,19 @@ public enum LLMPricing {
             cacheReadPerMTok: 0.50,
             outputPerMTok: 25.00
         ),
+        "claude-opus-4-6[1m]": ModelPricing(
+            inputPerMTok: 5.00,
+            cacheWritePerMTok: 6.25,
+            cacheReadPerMTok: 0.50,
+            outputPerMTok: 25.00
+        ),
         "claude-opus-4-7": ModelPricing(
+            inputPerMTok: 5.00,
+            cacheWritePerMTok: 6.25,
+            cacheReadPerMTok: 0.50,
+            outputPerMTok: 25.00
+        ),
+        "claude-opus-4-7[1m]": ModelPricing(
             inputPerMTok: 5.00,
             cacheWritePerMTok: 6.25,
             cacheReadPerMTok: 0.50,

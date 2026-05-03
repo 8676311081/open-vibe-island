@@ -140,4 +140,27 @@ struct LLMPricingProfileFallbackTests {
         // Must NOT be the DeepSeek V4 Pro rate (which would be $0.435)
         #expect(abs((cost ?? 0) - 0.435) > 1.0)
     }
+
+    /// `claude-opus-4-7[1m]` is the 1M-context SKU suffix Claude CLI
+    /// emits. The prefix matcher's `key + "-"` delimiter doesn't
+    /// catch `[`-separated suffixes, so bracketed variants need
+    /// explicit table rows. Verify the row added in 4.6.3b.
+    @Test
+    func pricingResolvesBracketSuffixOpus47() {
+        let usage = TokenUsage(input: 1_000_000, cacheWrite: 0, cacheRead: 0, output: 0)
+        let cost = LLMPricing.costUSD(model: "claude-opus-4-7[1m]", usage: usage)
+        #expect(cost != nil)
+        let expected = 5.00 // same as bare claude-opus-4-7
+        #expect(abs((cost ?? 0) - expected) < 0.01)
+    }
+
+    /// `claude-sonnet-4-6[1m]` — same bracket form, Sonnet pricing.
+    @Test
+    func pricingResolvesBracketSuffixSonnet46() {
+        let usage = TokenUsage(input: 1_000_000, cacheWrite: 0, cacheRead: 0, output: 0)
+        let cost = LLMPricing.costUSD(model: "claude-sonnet-4-6[1m]", usage: usage)
+        #expect(cost != nil)
+        let expected = 3.00 // same as bare claude-sonnet-4-6
+        #expect(abs((cost ?? 0) - expected) < 0.01)
+    }
 }

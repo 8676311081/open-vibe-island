@@ -13,6 +13,13 @@ import Foundation
 /// verification date. The lookup is longest-prefix, so a precise
 /// dated suffix (e.g. `claude-opus-4-7-20251205`) will resolve via
 /// the `claude-opus-4-7` row without an explicit dated entry.
+///
+/// IMPORTANT — cross-ref invariant with LLMPricing.swift:
+/// Any new model SKU keyword added here (e.g. `[1m]` bracket variant
+/// in 709a07b) MUST also be added to `LLMPricing.table`. Otherwise
+/// the observer computes context fill % correctly but fails pricing
+/// lookups — silent cost failure where known models accrue
+/// `unpricedTurns`. This invariant is mirrored in LLMPricing.swift.
 public enum ModelContextLimits {
     private struct Entry {
         let prefix: String
