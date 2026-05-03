@@ -332,6 +332,7 @@
 /* Profile cards */
 "modelRouting.card.cost" = "Input $%.3f / Output $%.3f / Mtok";
 "modelRouting.card.context" = "Context: %d tokens";
+"modelRouting.card.context.anthropicDual" = "Context: 200K · 1M with [1m] SKU";
 "modelRouting.card.cacheSupported" = "✓ Prompt cache supported";
 "modelRouting.card.activeBadge" = "Active";
 "modelRouting.card.action.activate" = "Switch to this →";

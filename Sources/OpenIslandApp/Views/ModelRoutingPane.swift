@@ -381,7 +381,7 @@ private struct ProfileCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 topRow
                 if let metadata = profile.costMetadata {
-                    metadataRows(metadata)
+                    metadataRows(metadata, profileId: profile.id)
                 }
                 Spacer(minLength: 0)
                 actionRow
@@ -421,7 +421,7 @@ private struct ProfileCard: View {
         }
     }
 
-    private func metadataRows(_ metadata: ProfileCostMetadata) -> some View {
+    private func metadataRows(_ metadata: ProfileCostMetadata, profileId: String) -> some View {
         let now = Date()
         let inputPrice = ModelRoutingDerivation.effectiveInputPrice(metadata: metadata, now: now)
         let outputPrice = ModelRoutingDerivation.effectiveOutputPrice(metadata: metadata, now: now)
@@ -429,14 +429,35 @@ private struct ProfileCard: View {
             Text(String(format: lang.t("modelRouting.card.cost"), inputPrice, outputPrice))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-            Text(String(format: lang.t("modelRouting.card.context"), metadata.contextWindowTokens))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+            // Anthropic 原生 routes claude-opus-4-7 / sonnet-4-* at
+            // 200K AND their `-1m` / `[1m]` extended-context variants
+            // at 1M against the same baseURL — the upstream picks
+            // window per model id. Showing only "200000 tokens" hid
+            // the 1M option; users on Claude CLI's `claude-opus-4-7
+            // [1m]` would think they had 200K when ModelContextLimits
+            // (post-fix) correctly reports 1M. Special-case the card
+            // to surface both.
+            anthropicContextLineOrFallback(metadata: metadata, profileId: profileId)
             if metadata.cacheReadUSDPerMtok != nil {
                 Text(lang.t("modelRouting.card.cacheSupported"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func anthropicContextLineOrFallback(
+        metadata: ProfileCostMetadata, profileId: String
+    ) -> some View {
+        if profileId == "anthropic-native" {
+            Text(lang.t("modelRouting.card.context.anthropicDual"))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        } else {
+            Text(String(format: lang.t("modelRouting.card.context"), metadata.contextWindowTokens))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 

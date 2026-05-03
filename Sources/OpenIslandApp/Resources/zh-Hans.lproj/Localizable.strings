@@ -331,6 +331,7 @@
 /* 模型卡片 */
 "modelRouting.card.cost" = "输入 $%.3f / 输出 $%.3f / Mtok";
 "modelRouting.card.context" = "上下文：%d tokens";
+"modelRouting.card.context.anthropicDual" = "上下文：200K · [1m] SKU 1M";
 "modelRouting.card.cacheSupported" = "✓ 支持 prompt cache";
 "modelRouting.card.activeBadge" = "激活";
 "modelRouting.card.action.activate" = "切换到此 →";
