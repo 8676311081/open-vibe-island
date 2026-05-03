@@ -22,17 +22,32 @@ public enum ModelContextLimits {
     /// Sources + verification timestamps in inline comments. Bump and
     /// re-verify when bumping the table.
     private static let table: [Entry] = [
-        // Anthropic — verified 2026-05-02 against
+        // Anthropic — verified 2026-05-03 against
         // https://docs.anthropic.com/en/docs/about-claude/models
-        // The `[1m]` 1M-context Claude Code variant is a SKU
-        // suffix (e.g. `claude-opus-4-7[1m]`). The proxy normalizes
-        // that off in `LLMProxyHTTP` before this lookup, so the
-        // common case sees the bare model name and resolves to
-        // 200_000.
+        //
+        // Model ids may carry a `-1m` suffix or `[1m]` bracket
+        // variant indicating Anthropic's extended 1M-context SKU
+        // (e.g. `claude-opus-4-7[1m]` is the form Claude Code
+        // emits). We list those as DISTINCT table entries; the
+        // longest-prefix matcher picks them over the bare 200K row.
+        // No proxy-side normalization happens — earlier comment
+        // claimed `LLMProxyHTTP` strips `[1m]` but a grep finds no
+        // such code path, so the lookup must handle the suffix on
+        // its own. Future SKUs (e.g. `-2m` if released) require an
+        // explicit row.
+        Entry(prefix: "claude-opus-4-7[1m]", contextTokens: 1_000_000),
+        Entry(prefix: "claude-opus-4-7-1m", contextTokens: 1_000_000),
         Entry(prefix: "claude-opus-4-7", contextTokens: 200_000),
         Entry(prefix: "claude-opus-4-6", contextTokens: 200_000),
         Entry(prefix: "claude-opus-4-5", contextTokens: 200_000),
+        Entry(prefix: "claude-sonnet-4-6-1m", contextTokens: 1_000_000),
         Entry(prefix: "claude-sonnet-4-6", contextTokens: 200_000),
+        // claude-sonnet-4-5-1m is Anthropic's first published 1M
+        // beta SKU (Aug 2025 release). Listed even when not actively
+        // selected by Open Island users today, because Claude Code
+        // can still pin to it via env override and we don't want a
+        // misclassification regression if anyone does.
+        Entry(prefix: "claude-sonnet-4-5-1m", contextTokens: 1_000_000),
         Entry(prefix: "claude-sonnet-4-5", contextTokens: 200_000),
         Entry(prefix: "claude-haiku-4-5", contextTokens: 200_000),
 

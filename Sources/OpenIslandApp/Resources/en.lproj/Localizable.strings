@@ -310,6 +310,7 @@
 "settings.llmSpend.compression.confirmSheetConfirm" = "Install";
 "settings.llmSpend.compression.confirmSheetCancel" = "Cancel";
 "settings.llmSpend.compression.statsAllTime" = "All time: %@ commands, ~%@%% saved on average";
+"settings.llmSpend.compression.statsTooltip" = "Average compression rate (per-command equal-weight, cumulative since RTK install).\nNot weighted by token count or time — each command counts once, regardless of size.\nLast synced: %@";
 "common.close" = "Close";
 
 /* Model routing pane (4.3 commit consumes these; placeholders filed

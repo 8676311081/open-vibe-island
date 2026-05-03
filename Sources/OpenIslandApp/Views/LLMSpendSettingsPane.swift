@@ -576,7 +576,12 @@ struct LLMSpendSettingsPane: View {
     private func compressionStatsRow(_ summary: CompressionSummary) -> some View {
         // RTK gain reports cumulative summary — never per-day or
         // per-client. Surface it as "all time" rather than fake a
-        // 7-day window we don't have data for.
+        // 7-day window we don't have data for. The ⓘ tooltip
+        // clarifies the savings-percent metric: same RTK source as
+        // `rtk gain` (per-command equal-weight average since the
+        // first run), so adjacent snapshots can drift a few percent
+        // when new long-output commands land — the user shouldn't
+        // read that drift as a different methodology.
         HStack(spacing: 8) {
             Image(systemName: "chart.bar.doc.horizontal")
                 .foregroundStyle(.secondary)
@@ -587,7 +592,27 @@ struct LLMSpendSettingsPane: View {
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
+            Image(systemName: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(compressionStatsTooltip(for: summary))
         }
+    }
+
+    private func compressionStatsTooltip(for summary: CompressionSummary) -> String {
+        // Same date format as the rest of the pane's bookkeeping
+        // (yyyy-MM-dd HH:mm in local time). Localized formatter
+        // would re-order Western/CJK ordering, but RTK gain itself
+        // emits ISO-style timestamps, so matching that keeps the
+        // tooltip's timestamp recognizable when the user cross-
+        // references rtk gain --history in a terminal.
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let lastSync = formatter.string(from: summary.lastUpdatedAt)
+        return String(
+            format: lang.t("settings.llmSpend.compression.statsTooltip"),
+            lastSync
+        )
     }
 
     private var rtkConfirmSheet: some View {

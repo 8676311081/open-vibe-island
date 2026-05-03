@@ -279,6 +279,7 @@
 "settings.llmSpend.compression.confirmSheetConfirm" = "安裝";
 "settings.llmSpend.compression.confirmSheetCancel" = "取消";
 "settings.llmSpend.compression.statsAllTime" = "累計：%@ 次指令，平均節省約 %@%%";
+"settings.llmSpend.compression.statsTooltip" = "平均壓縮率（按指令數等權累計，自 RTK 安裝以來）。\n不按 token 數或耗時加權——每條指令計一次，無關大小。\n最近一次同步：%@";
 "common.close" = "關閉";
 
 /* 模型路由面板 (4.3 commit 使用；4.2 預先佔位以穩定 key)。 */
