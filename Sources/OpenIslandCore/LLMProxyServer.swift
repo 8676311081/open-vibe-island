@@ -396,13 +396,23 @@ public final class LLMProxyServer: @unchecked Sendable {
             return
         }
 
-        // Apply the single permitted body mutation. See LLMRequestRewriter
-        // for the full rationale.
-        let outboundBody: Data
+        // Apply the audited body mutations. See LLMRequestRewriter
+        // for the full rationale (items #2 and #4 of the audit list).
+        // Item #2 is OpenAI-only (chat/completions usage opt-in).
+        // Item #4 is profile-driven model rewrite — covers Anthropic
+        // and OpenAI paths alike since the active profile's
+        // modelOverride applies to whatever the active upstream
+        // expects.
+        var outboundBody: Data = body
         if upstream == .openai, LLMRequestRewriter.shouldRewrite(path: head.path) {
-            outboundBody = LLMRequestRewriter.rewrittenChatCompletionsBody(body)
-        } else {
-            outboundBody = body
+            outboundBody = LLMRequestRewriter.rewrittenChatCompletionsBody(outboundBody)
+        }
+        if let resolver = profileResolver {
+            outboundBody = LLMRequestRewriter.rewriteModelFieldIfNeeded(
+                outboundBody,
+                path: head.path,
+                profileResolver: resolver
+            )
         }
 
         let context = LLMProxyRequestContext(

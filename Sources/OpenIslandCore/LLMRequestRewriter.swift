@@ -34,9 +34,18 @@ import Foundation
 ///    401 so the misconfiguration is loud. See
 ///    `rewriteAuthorizationIfNeeded`.
 ///
-/// 4. **(RESERVED for 4.x)** Rewrite request body `model` field
-///    when active profile is a DeepSeek V4 Pro/Flash variant
-///    sharing the same endpoint. Stub-only in this commit.
+/// 4. **Rewrite request body `model` field for non-Anthropic
+///    profiles** — when the active `UpstreamProfile` carries a
+///    `modelOverride` string (DeepSeek V4 Pro/Flash both target
+///    `api.deepseek.com/anthropic` and accept ONLY their own model
+///    ids), substitute `modelOverride` in for whatever model the
+///    client put on the request body. claude CLI sends Anthropic
+///    ids like `claude-opus-4-7[1m]`; without this rewrite the
+///    DeepSeek upstream returns 400/422 for "unknown model". Lives
+///    in `rewriteModelFieldIfNeeded`. Profiles with `modelOverride
+///    == nil` (anthropic-native) are left untouched. Path-gated to
+///    `/v1/messages` and `/v1/chat/completions` so
+///    `/v1/models`-style admin probes pass through.
 ///
 /// **What we do not touch:** message content, tool definitions,
 /// temperature, system prompts, model selection (outside item #4),
@@ -132,5 +141,59 @@ public enum LLMRequestRewriter {
         } else {
             headers.append((name: "Authorization", value: newValue))
         }
+    }
+
+    /// Path-gate for the body model rewrite. We only mutate bodies
+    /// the upstream actually parses as request bodies with a `model`
+    /// field. Other endpoints (e.g. `/v1/models`, `/v1/health`) pass
+    /// through untouched even if active profile has a modelOverride.
+    public static func shouldRewriteModelField(path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.hasPrefix("/v1/messages") || lower.hasPrefix("/v1/chat/completions")
+    }
+
+    /// Substitute the active profile's `modelOverride` into the
+    /// request body's top-level `model` field. Returns the rewritten
+    /// body data, or the original body if no rewrite is required /
+    /// possible.
+    ///
+    /// **No-op cases** (caller's body passes through unchanged):
+    /// - `profileResolver` is nil (legacy callers without routing)
+    /// - active profile has `modelOverride == nil` (anthropic-native)
+    /// - body is empty or not valid JSON
+    /// - top-level JSON value isn't an object (degenerate request —
+    ///   we don't synthesize fields, just rewrite existing ones)
+    /// - object has no `model` field — fail-closed: don't INVENT a
+    ///   field the client didn't send. The upstream will surface
+    ///   the missing-model error directly, which is louder than us
+    ///   silently injecting a value.
+    ///
+    /// Bracketed / dated suffix variants like
+    /// `claude-opus-4-7[1m]` and `claude-opus-4-7-20251205` are
+    /// replaced wholesale — the entire `model` value becomes the
+    /// override regardless of input shape.
+    public static func rewriteModelFieldIfNeeded(
+        _ body: Data,
+        path: String,
+        profileResolver: any UpstreamProfileResolver
+    ) -> Data {
+        guard shouldRewriteModelField(path: path) else { return body }
+        let active = profileResolver.currentActiveProfile()
+        guard let override = active.modelOverride, !override.isEmpty else {
+            return body
+        }
+        guard !body.isEmpty,
+              var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else { return body }
+        guard json["model"] != nil else {
+            // Fail-closed: don't fabricate a model field. Upstream
+            // 400 with a clear error is better than us guessing.
+            return body
+        }
+        json["model"] = override
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            return body
+        }
+        return rewritten
     }
 }
