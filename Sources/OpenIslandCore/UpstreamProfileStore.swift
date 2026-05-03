@@ -18,13 +18,28 @@ public protocol UpstreamProfileResolver: Sendable {
 /// Single owner of the active-profile + custom-profiles state.
 /// Backed by `UserDefaults` with namespaced keys
 /// (`OpenIsland.LLMProxy.activeProfileId`,
-/// `OpenIsland.LLMProxy.customProfiles`). Final class +
-/// `@unchecked Sendable` so the proxy hot path can call
-/// `profileMatching(url:)` synchronously without an `await`
-/// hop — the user spec sketched an actor here, but a sync rewriter
-/// can't await without cascading async-ness through every call
-/// site, so this matches `RouterCredentialsStore`'s pattern: NSLock
-/// inside, sync read API outside.
+/// `OpenIsland.LLMProxy.customProfiles`).
+///
+/// **Why `final class + NSLock` instead of `actor`:**
+///
+/// This store is read on the proxy hot path — every Anthropic API
+/// request passes through `profileMatching(url:)` to determine
+/// whether the Authorization rewrite applies. Making it an actor
+/// would force `await` at the call site, propagating `async`
+/// through `LLMRequestRewriter`, the request handling chain, and
+/// ultimately the `NWListener` handler — turning sync callbacks
+/// into async ones with suspension points on every request.
+///
+/// Profile data is small (< 50 entries even with custom additions),
+/// mutations are rare (only on user-initiated profile add / remove
+/// / switch). NSLock contention is negligible. Sync read path
+/// keeps the proxy fast.
+///
+/// If a future Swift evolution adds a sync-callable actor variant
+/// (sometimes discussed as "isolated subclass" or "actor accessors"
+/// — none accepted at time of writing), revisit. Until then:
+/// final class + NSLock is the right tool. Same pattern as
+/// `RouterCredentialsStore`.
 public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sendable {
     public static let activeProfileIdDefaultsKey = "OpenIsland.LLMProxy.activeProfileId"
     public static let customProfilesDefaultsKey = "OpenIsland.LLMProxy.customProfiles"
