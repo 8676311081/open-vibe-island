@@ -485,6 +485,10 @@ struct LLMSpendStatsView: View {
         /// nil when *every* bucket aggregating into this model is a
         /// legacy bucket without modelTokens recorded — UI shows "—".
         let tokens: Int?
+        /// Per-model cache-hit ratio in [0, 1], or nil when every
+        /// aggregating bucket is a legacy bucket without per-model
+        /// cache breakdown — UI shows "—".
+        let cacheHitRatio: Double?
         let cost: Double
         let isUnpriced: Bool
 
@@ -498,32 +502,60 @@ struct LLMSpendStatsView: View {
             guard let tokens else { return "—" }
             return formatter(tokens)
         }
+
+        var cacheHitDisplay: String { LLMSpendStatsView.formatRatio(cacheHitRatio) }
     }
 
     private func modelBreakdown() -> [ModelEntry] {
-        var byModel: [String: (turns: Int, tokens: Int, cost: Double, unpricedTurns: Int, hasTokens: Bool)] = [:]
+        struct Sums {
+            var turns: Int = 0
+            var tokens: Int = 0
+            var cost: Double = 0
+            var unpricedTurns: Int = 0
+            var hasTokens: Bool = false
+            // Per-model cache-hit components. Tracked separately from
+            // bucket-level so the byModel ratio matches what the user
+            // would compute by hand from the model's own traffic.
+            var input: Int = 0
+            var cacheRead: Int = 0
+            var cacheCreation: Int = 0
+            var hasCacheBreakdown: Bool = false
+        }
+        var byModel: [String: Sums] = [:]
         for entry in rangeData {
             for bucket in entry.buckets.values where bucket.turns > 0 {
                 for (modelID, mTurns) in bucket.modelTurns where mTurns > 0 {
-                    let mCost = bucket.modelCosts[modelID] ?? 0
-                    let hasCost = bucket.modelCosts.keys.contains(modelID)
-                    let mTokens = bucket.modelTokens[modelID] ?? 0
-                    let hasTokens = bucket.modelTokens.keys.contains(modelID)
-                    var sums = byModel[modelID] ?? (0, 0, 0, 0, false)
+                    var sums = byModel[modelID] ?? Sums()
                     sums.turns += mTurns
-                    sums.tokens += mTokens
-                    sums.cost += mCost
-                    if !hasCost { sums.unpricedTurns += mTurns }
-                    if hasTokens { sums.hasTokens = true }
+                    sums.cost += bucket.modelCosts[modelID] ?? 0
+                    if !bucket.modelCosts.keys.contains(modelID) {
+                        sums.unpricedTurns += mTurns
+                    }
+                    if bucket.modelTokens.keys.contains(modelID) {
+                        sums.tokens += bucket.modelTokens[modelID] ?? 0
+                        sums.hasTokens = true
+                    }
+                    let hasInput = bucket.modelInputTokens.keys.contains(modelID)
+                    let hasRead = bucket.modelCacheReadTokens.keys.contains(modelID)
+                    let hasCreation = bucket.modelCacheCreationTokens.keys.contains(modelID)
+                    if hasInput || hasRead || hasCreation {
+                        sums.input += bucket.modelInputTokens[modelID] ?? 0
+                        sums.cacheRead += bucket.modelCacheReadTokens[modelID] ?? 0
+                        sums.cacheCreation += bucket.modelCacheCreationTokens[modelID] ?? 0
+                        sums.hasCacheBreakdown = true
+                    }
                     byModel[modelID] = sums
                 }
             }
         }
         return byModel.map { id, val in
-            ModelEntry(
+            let denom = val.input + val.cacheRead + val.cacheCreation
+            let ratio: Double? = (val.hasCacheBreakdown && denom > 0) ? Double(val.cacheRead) / Double(denom) : nil
+            return ModelEntry(
                 modelID: id,
                 turns: val.turns,
                 tokens: val.hasTokens ? val.tokens : nil,
+                cacheHitRatio: ratio,
                 cost: val.cost,
                 isUnpriced: val.unpricedTurns == val.turns && val.cost == 0
             )
@@ -567,6 +599,8 @@ struct LLMSpendStatsView: View {
                 .frame(width: 70, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colTokens"))
                 .frame(width: 80, alignment: .trailing)
+            Text(lang.t("settings.llmSpend.stats.colCacheHit"))
+                .frame(width: 80, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colCost"))
                 .frame(width: 80, alignment: .trailing)
                 .padding(.trailing, 14)
@@ -596,6 +630,13 @@ struct LLMSpendStatsView: View {
             Text(entry.tokensDisplay(using: formattedTokens))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(entry.tokens == nil ? Color.secondary : Color.primary)
+                .frame(width: 80, alignment: .trailing)
+            Text(entry.cacheHitDisplay)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(entry.cacheHitRatio == nil ? Color.secondary : Color.primary)
+                .help(entry.cacheHitRatio == nil
+                      ? lang.t("settings.llmSpend.stats.cacheHitLegacyTooltip")
+                      : "")
                 .frame(width: 80, alignment: .trailing)
             Text(entry.costDisplay)
                 .font(.subheadline.monospacedDigit())

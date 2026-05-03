@@ -45,6 +45,16 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     /// `tokensIn + tokensOut` for buckets recorded after this field
     /// landed; legacy buckets decode to `[:]` and the UI shows "—".
     public var modelTokens: [String: Int]
+    /// Per-model breakdown of the three components that make up the
+    /// cache-hit ratio (cacheRead / (input + cacheRead + cacheCreation)).
+    /// Each is the sum of `usage.input` / `usage.cacheRead` /
+    /// `usage.cacheWrite` (DeepSeek's prompt_cache_hit_tokens lands in
+    /// cacheRead via the OpenAI-style fallback in LLMUsageExtraction).
+    /// Legacy buckets decode to `[:]` so the byModel row falls back to
+    /// "—" until new turns rebuild it.
+    public var modelInputTokens: [String: Int]
+    public var modelCacheReadTokens: [String: Int]
+    public var modelCacheCreationTokens: [String: Int]
     public var duplicateToolCalls: Int
     /// Sum of estimated tokens for tools the model declared in
     /// `tools[]` but never invoked during the turn. Estimated from
@@ -68,6 +78,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         modelTurns: [String: Int] = [:],
         modelCosts: [String: Double] = [:],
         modelTokens: [String: Int] = [:],
+        modelInputTokens: [String: Int] = [:],
+        modelCacheReadTokens: [String: Int] = [:],
+        modelCacheCreationTokens: [String: Int] = [:],
         duplicateToolCalls: Int = 0,
         unusedToolTokensWasted: Int = 0,
         lastWarning: LLMDuplicateWarning? = nil,
@@ -84,6 +97,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         self.modelTurns = modelTurns
         self.modelCosts = modelCosts
         self.modelTokens = modelTokens
+        self.modelInputTokens = modelInputTokens
+        self.modelCacheReadTokens = modelCacheReadTokens
+        self.modelCacheCreationTokens = modelCacheCreationTokens
         self.duplicateToolCalls = duplicateToolCalls
         self.unusedToolTokensWasted = unusedToolTokensWasted
         self.lastWarning = lastWarning
@@ -95,6 +111,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         case inputTokens, cacheReadTokens, cacheCreationTokens
         case costUsd, unpricedTurns
         case modelTurns, modelCosts, modelTokens
+        case modelInputTokens, modelCacheReadTokens, modelCacheCreationTokens
         case duplicateToolCalls
         case unusedToolTokensWasted
         case lastWarning, lastUpdatedAt
@@ -113,6 +130,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         modelTurns = try c.decodeIfPresent([String: Int].self, forKey: .modelTurns) ?? [:]
         modelCosts = try c.decodeIfPresent([String: Double].self, forKey: .modelCosts) ?? [:]
         modelTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelTokens) ?? [:]
+        modelInputTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelInputTokens) ?? [:]
+        modelCacheReadTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelCacheReadTokens) ?? [:]
+        modelCacheCreationTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelCacheCreationTokens) ?? [:]
         duplicateToolCalls = try c.decodeIfPresent(Int.self, forKey: .duplicateToolCalls) ?? 0
         unusedToolTokensWasted = try c.decodeIfPresent(Int.self, forKey: .unusedToolTokensWasted) ?? 0
         lastWarning = try c.decodeIfPresent(LLMDuplicateWarning.self, forKey: .lastWarning)
@@ -316,6 +336,11 @@ public actor LLMStatsStore {
             // Match the bucket-level tokens metric (in + cache_write + cache_read + out)
             // so the byModel row totals to the bySource row.
             bucket.modelTokens[model, default: 0] += usage.input + usage.cacheWrite + usage.cacheRead + usage.output
+            // Mirror the per-bucket cache-hit components, scoped by
+            // model so the byModel row can compute the same ratio.
+            bucket.modelInputTokens[model, default: 0] += usage.input
+            bucket.modelCacheReadTokens[model, default: 0] += usage.cacheRead
+            bucket.modelCacheCreationTokens[model, default: 0] += usage.cacheWrite
         }
         bucket.lastUpdatedAt = date
         dayBuckets[client.rawValue] = bucket
