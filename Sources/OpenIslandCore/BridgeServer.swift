@@ -527,6 +527,7 @@ public final class BridgeServer: @unchecked Sendable {
 
             emit(approvalEvent)
 
+            guard pendingApprovals[payload.sessionID] == nil else { return }
             pendingApprovals[payload.sessionID] = PendingApproval(
                 clientID: clientID
             )
@@ -627,6 +628,7 @@ public final class BridgeServer: @unchecked Sendable {
             ensureClaudeSessionExists(for: payload)
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
+            guard pendingClaudeToolContexts[payload.permissionCorrelationKey] == nil else { return }
             pendingClaudeToolContexts[payload.permissionCorrelationKey] = PendingClaudeToolContext(
                 toolUseID: payload.toolUseID,
                 toolName: payload.toolName,
@@ -683,6 +685,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
 
+                guard pendingClaudeInteractions[payload.sessionID] == nil else { return }
                 pendingClaudeInteractions[payload.sessionID] = PendingClaudeInteraction(
                     clientID: clientID,
                     kind: .question(payload, prompt)
@@ -709,6 +712,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
 
+                guard pendingClaudeInteractions[payload.sessionID] == nil else { return }
                 pendingClaudeInteractions[payload.sessionID] = PendingClaudeInteraction(
                     clientID: clientID,
                     kind: .permission(payload)
@@ -1058,6 +1062,7 @@ public final class BridgeServer: @unchecked Sendable {
                 )
             )
 
+            guard pendingOpenCodeInteractions[payload.sessionID] == nil else { return }
             pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
                 clientID: clientID,
                 kind: .permission(payload)
@@ -1082,6 +1087,7 @@ public final class BridgeServer: @unchecked Sendable {
                 )
             )
 
+            guard pendingOpenCodeInteractions[payload.sessionID] == nil else { return }
             pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
                 clientID: clientID,
                 kind: .question(payload)
@@ -1164,6 +1170,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
             )
+            guard pendingCursorInteractions[payload.sessionID] == nil else { return }
             pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
                 clientID: clientID,
                 payload: payload
@@ -1189,6 +1196,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
             )
+            guard pendingCursorInteractions[payload.sessionID] == nil else { return }
             pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
                 clientID: clientID,
                 payload: payload
