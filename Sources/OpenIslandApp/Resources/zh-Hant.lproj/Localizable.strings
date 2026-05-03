@@ -310,9 +310,18 @@
 "modelRouting.card.action.error" = "設定異常";
 "modelRouting.card.custom.title" = "自訂";
 "modelRouting.card.custom.description" = "新增你自己的上游 URL 和密鑰。";
-"modelRouting.card.custom.add" = "+ 新增 (下個版本)";
+"modelRouting.card.custom.add" = "+ 新增";
 "modelRouting.custom.comingSoon" = "自訂 profile 編輯功能將在下個版本上線。";
 "modelRouting.customSectionTitle" = "自訂 profile";
+"modelRouting.customSheet.title" = "新增自訂上游";
+"modelRouting.customSheet.urlLabel" = "上游 URL";
+"modelRouting.customSheet.urlPlaceholder" = "https://api.example.com/anthropic";
+"modelRouting.customSheet.keyLabel" = "API Key";
+"modelRouting.customSheet.modelLabel" = "模型";
+"modelRouting.customSheet.modelPlaceholder" = "選擇或輸入模型 ID";
+"modelRouting.customSheet.fetchModels" = "獲取模型列表";
+"modelRouting.customSheet.fetchFailed" = "無法獲取模型列表，請手動輸入模型 ID。";
+"modelRouting.customSheet.deleteTooltip" = "刪除此自訂 profile";
 "modelRouting.error.activeKeyMissing" = "目前啟用的 profile 缺少 API key。請切換到已設定的 profile。";
 "modelRouting.discount.daysRemaining" = "折扣剩 %d 天";
 

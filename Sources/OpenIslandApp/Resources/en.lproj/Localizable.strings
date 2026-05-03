@@ -342,9 +342,18 @@
 "modelRouting.card.action.error" = "Configuration error";
 "modelRouting.card.custom.title" = "Custom";
 "modelRouting.card.custom.description" = "Add your own upstream URL and credential.";
-"modelRouting.card.custom.add" = "+ Add (next release)";
+"modelRouting.card.custom.add" = "+ Add";
 "modelRouting.custom.comingSoon" = "Custom profile editing ships in the next release.";
 "modelRouting.customSectionTitle" = "Custom profiles";
+"modelRouting.customSheet.title" = "Add Custom Upstream";
+"modelRouting.customSheet.urlLabel" = "Upstream URL";
+"modelRouting.customSheet.urlPlaceholder" = "https://api.example.com/anthropic";
+"modelRouting.customSheet.keyLabel" = "API Key";
+"modelRouting.customSheet.modelLabel" = "Model";
+"modelRouting.customSheet.modelPlaceholder" = "Select or type model ID";
+"modelRouting.customSheet.fetchModels" = "Fetch Models";
+"modelRouting.customSheet.fetchFailed" = "Could not fetch model list. Type model ID manually.";
+"modelRouting.customSheet.deleteTooltip" = "Delete this custom profile";
 "modelRouting.error.activeKeyMissing" = "Active profile is missing its API key. Switch to a configured profile or remove the active selection.";
 "modelRouting.discount.daysRemaining" = "Discount %d d";
 

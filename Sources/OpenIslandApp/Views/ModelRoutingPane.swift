@@ -121,6 +121,7 @@ struct ModelRoutingPane: View {
     @State private var pendingSwitch: UpstreamProfile?
     @State private var configuringProfile: UpstreamProfile?
     @State private var errorBanner: String?
+    @State private var showCustomProfileSheet: Bool = false
     /// Snapshot of the health monitor refreshed on appear and after
     /// each switch. Live updating (proxy degrading WHILE the pane
     /// is open) is deferred to a future polling-task commit — the
@@ -171,6 +172,16 @@ struct ModelRoutingPane: View {
                     refreshState()
                 },
                 onCancel: { configuringProfile = nil }
+            )
+        }
+        .sheet(isPresented: $showCustomProfileSheet) {
+            CustomProfileSheet(
+                model: model,
+                onSaved: {
+                    showCustomProfileSheet = false
+                    refreshState()
+                },
+                onCancel: { showCustomProfileSheet = false }
             )
         }
     }
@@ -245,31 +256,57 @@ struct ModelRoutingPane: View {
                 )
             }
             CustomPlaceholderCard(lang: lang, onTap: {
-                errorBanner = lang.t("modelRouting.custom.comingSoon")
+                showCustomProfileSheet = true
             })
         }
     }
 
     private var customSection: some View {
-        // Existing custom profiles list — currently always empty
-        // because the add flow ships in a follow-up commit. Stub the
-        // section out so the layout doesn't shift when entries
-        // appear later.
         let custom = profileStore.allProfiles.filter(\.isCustom)
         if custom.isEmpty {
             return AnyView(EmptyView())
         }
         return AnyView(
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(lang.t("modelRouting.customSectionTitle"))
                     .font(.headline)
                 ForEach(custom) { profile in
-                    Text(lang.t(profile.displayName))
-                        .font(.body)
+                    HStack(spacing: 0) {
+                        ProfileCard(
+                            profile: profile,
+                            state: derivedCardState(for: profile),
+                            discountState: ModelRoutingDerivation.discountState(
+                                metadata: profile.costMetadata,
+                                now: Date()
+                            ),
+                            lang: lang,
+                            onTap: { handleTap(on: profile) }
+                        )
+                        Button(role: .destructive) {
+                            deleteCustomProfile(profile)
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.leading, 8)
+                    }
                 }
             }
             .padding(.top, 8)
         )
+    }
+
+    private func deleteCustomProfile(_ profile: UpstreamProfile) {
+        do {
+            try profileStore.removeCustomProfile(id: profile.id)
+            if let account = profile.keychainAccount {
+                try? credentialsStore.deleteCredential(for: account)
+            }
+            refreshState()
+        } catch {
+            errorBanner = error.localizedDescription
+        }
     }
 
     private func derivedCardState(for profile: UpstreamProfile) -> ProfileCardState {
@@ -674,6 +711,239 @@ private struct KeyConfigSheet: View {
             // If Keychain refuses, surface as test result so the user
             // sees something rather than the sheet freezing.
             testResult = .networkError(message: error.localizedDescription)
+        }
+    }
+}
+
+// MARK: - Custom profile sheet
+
+@MainActor
+private struct CustomProfileSheet: View {
+    var model: AppModel
+    let onSaved: () -> Void
+    let onCancel: () -> Void
+
+    @State private var urlText: String = ""
+    @State private var keyText: String = ""
+    @State private var selectedModel: String = ""
+    @State private var manualModel: String = ""
+    @State private var fetchedModels: [String]?
+    @State private var isFetchingModels: Bool = false
+    @State private var isTesting: Bool = false
+    @State private var testResult: DeepSeekKeyValidator.Result?
+    @State private var fetchError: String?
+
+    private var lang: LanguageManager { model.lang }
+
+    private var parsedURL: URL? {
+        let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host != nil, !(url.host ?? "").isEmpty
+        else { return nil }
+        return url
+    }
+
+    private var effectiveModel: String {
+        if let models = fetchedModels, !models.isEmpty {
+            return selectedModel.isEmpty ? (models.first ?? "") : selectedModel
+        }
+        return manualModel
+    }
+
+    private var canSave: Bool {
+        guard parsedURL != nil else { return false }
+        guard keyText.count >= 20 else { return false }
+        guard !effectiveModel.isEmpty else { return false }
+        return DeepSeekKeyValidator.saveAllowed(for: testResult)
+    }
+
+    private var profileID: String {
+        parsedURL?.host?.replacingOccurrences(of: ".", with: "-") ?? "custom"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(lang.t("modelRouting.customSheet.title"))
+                .font(.headline)
+
+            // URL
+            VStack(alignment: .leading, spacing: 4) {
+                Text(lang.t("modelRouting.customSheet.urlLabel"))
+                    .font(.caption.weight(.medium))
+                TextField(
+                    lang.t("modelRouting.customSheet.urlPlaceholder"),
+                    text: $urlText
+                )
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: urlText) { _, _ in
+                    testResult = nil
+                    fetchedModels = nil
+                    fetchError = nil
+                }
+            }
+
+            // API Key
+            VStack(alignment: .leading, spacing: 4) {
+                Text(lang.t("modelRouting.customSheet.keyLabel"))
+                    .font(.caption.weight(.medium))
+                SecureField(lang.t("modelRouting.keySheet.placeholder"), text: $keyText)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: keyText) { _, _ in
+                        testResult = nil
+                    }
+            }
+
+            // Model
+            VStack(alignment: .leading, spacing: 4) {
+                Text(lang.t("modelRouting.customSheet.modelLabel"))
+                    .font(.caption.weight(.medium))
+                if let models = fetchedModels, !models.isEmpty {
+                    Picker(lang.t("modelRouting.customSheet.modelPlaceholder"),
+                           selection: $selectedModel) {
+                        ForEach(models, id: \.self) { m in
+                            Text(m).tag(m)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedModel) { _, _ in
+                        testResult = nil
+                    }
+                } else {
+                    TextField(
+                        lang.t("modelRouting.customSheet.modelPlaceholder"),
+                        text: $manualModel
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: manualModel) { _, _ in
+                        testResult = nil
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button(action: { Task { await fetchModelList() } }) {
+                        if isFetchingModels {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(lang.t("modelRouting.customSheet.fetchModels"))
+                        }
+                    }
+                    .disabled(parsedURL == nil || keyText.isEmpty || isFetchingModels)
+                    if let error = fetchError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            // Test result
+            if let testResult {
+                testResultRow(testResult)
+            }
+
+            // Actions
+            HStack {
+                Spacer()
+                Button(lang.t("common.cancel"), action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button(action: { Task { await runConnectionTest() } }) {
+                    if isTesting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(lang.t("modelRouting.keySheet.testConnection"))
+                    }
+                }
+                .disabled(parsedURL == nil || keyText.isEmpty || effectiveModel.isEmpty || isTesting)
+                Button(lang.t("modelRouting.keySheet.save"), action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 480)
+    }
+
+    private func fetchModelList() async {
+        guard let url = parsedURL else { return }
+        isFetchingModels = true
+        fetchError = nil
+        let validator = UpstreamConnectionValidator(baseURL: url)
+        if let models = await validator.fetchModels(key: keyText) {
+            fetchedModels = models
+            if !models.isEmpty {
+                selectedModel = models[0]
+            }
+        } else {
+            fetchError = lang.t("modelRouting.customSheet.fetchFailed")
+            fetchedModels = nil
+        }
+        isFetchingModels = false
+    }
+
+    private func runConnectionTest() async {
+        guard let url = parsedURL else { return }
+        isTesting = true
+        let validator = UpstreamConnectionValidator(baseURL: url)
+        testResult = await validator.validate(key: keyText, model: effectiveModel)
+        isTesting = false
+    }
+
+    private func save() {
+        guard let url = parsedURL else { return }
+        let model = effectiveModel
+        let id = profileID
+        let account = "custom-\(id)"
+        let profile = UpstreamProfile(
+            id: id,
+            displayName: url.host ?? "Custom",
+            baseURL: url,
+            keychainAccount: account,
+            modelOverride: model.isEmpty ? nil : model,
+            isCustom: true,
+            costMetadata: nil
+        )
+        do {
+            try self.model.llmProxy.credentialsStore.setCredential(keyText, for: account)
+            try self.model.llmProxy.profileStore.addCustomProfile(profile)
+            onSaved()
+        } catch {
+            testResult = .networkError(message: error.localizedDescription)
+        }
+    }
+
+    private func testResultRow(_ result: DeepSeekKeyValidator.Result) -> some View {
+        let (text, color): (String, Color) = {
+            switch result {
+            case .valid:
+                return (lang.t("modelRouting.keySheet.testSuccess"), .green)
+            case .invalidKey:
+                return (lang.t("modelRouting.keySheet.testInvalidKey"), .red)
+            case .rateLimited:
+                return (lang.t("modelRouting.keySheet.testRateLimited"), .orange)
+            case let .upstreamError(code, body):
+                return (
+                    String(format: lang.t("modelRouting.keySheet.testFailedStatus"), code, body),
+                    .orange
+                )
+            case .timeout:
+                return (lang.t("modelRouting.keySheet.testTimeout"), .orange)
+            case let .networkError(message):
+                return (
+                    String(format: lang.t("modelRouting.keySheet.testFailedNetwork"), message),
+                    .red
+                )
+            }
+        }()
+        return HStack(spacing: 6) {
+            Image(systemName: result == .valid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(color)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(color)
+            Spacer()
         }
     }
 }
