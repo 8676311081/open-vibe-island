@@ -33,32 +33,12 @@ final class UpdateChecker: NSObject {
 
     /// Start Sparkle's automatic update checking schedule.
     /// Call once after app launch.
+    ///
+    /// Disabled in this fork: the SUFeedURL and SUPublicEDKey point to upstream
+    /// (Octane0411/open-vibe-island), where releases lack fork-specific enhancements.
+    /// Enabling auto-updates would silently overwrite those enhancements.
     func startIfNeeded() {
-        #if DEBUG
-        // Dev builds run from a local branch that often carries fixes not yet in
-        // the upstream appcast. Letting Sparkle prompt the user to "update" to
-        // 1.0.21 would overwrite the bundle and silently discard those fixes.
-        // Skip the auto-check entirely in debug — release bundles still update.
-        print("[UpdateChecker] skipped in DEBUG build")
-        return
-        #else
-        let updater = updaterController.updater
-        updater.automaticallyChecksForUpdates = true
-        updater.updateCheckInterval = 60 * 60 // 1 hour
-        updater.automaticallyDownloadsUpdates = false
-
-        do {
-            try updater.start()
-        } catch {
-            print("[UpdateChecker] Failed to start Sparkle updater: \(error)")
-        }
-
-        cancellable = updater.publisher(for: \.canCheckForUpdates)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] value in
-                self?.canCheckForUpdates = value
-            }
-        #endif
+        print("[UpdateChecker] skipped — fork build, auto-update disabled")
     }
 
     /// Manually trigger an update check (from Settings UI).
