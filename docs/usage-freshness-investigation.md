@@ -78,7 +78,59 @@ be coaxed from outside a real Terminal/iTerm/Ghostty/etc. session.
    interactive statusline receives fresh rate_limits. Claude Desktop
    and web usage may already be newer.`
 
-## Future: real-time parity (only if explicitly scoped)
+## Update 2026-05-04: Round 5 shipped
+
+The "real-time parity" project below was **scoped, validated, and
+implemented** in Round 5 (commits to be tagged). What changed:
+
+- DeepSeek's review proposed using `https://claude.ai/api/organizations/
+  {org_id}/usage` (the same endpoint Claude Desktop's Settings → Usage
+  page calls) instead of mitmproxy-ing Claude Desktop. Empirically
+  verified by driving Chrome via the Claude in Chrome MCP — schema
+  contains `five_hour.utilization` / `seven_day.utilization` plus
+  per-model buckets, and ClaudeUsageLoader's existing parser already
+  treats `utilization` as a fallback for `used_percentage`.
+- New module surface (all in `OpenIslandCore`):
+  - `ClaudeWebUsageCookieStore` — Keychain wrapper using
+    `kSecClassInternetPassword` + server="claude.ai" so the entry
+    appears as "Open Island — Claude Web Session" in Keychain Access.
+  - `ClaudeWebUsageClient` — `URLSession`-based HTTPS client with
+    explicit error mapping (`unauthorized` / `rateLimited(retryAfter:)`
+    / `schemaMismatch` / `httpError` / `transportError`).
+  - `ClaudeWebUsagePoller` — 5-minute timer; auto-resolves `org_id`
+    via `/api/organizations` on first run; failures don't touch the
+    cache file (statusline-fed data keeps showing); 401/403 fires
+    `onAuthFailure`; 10 consecutive failures (~50 min) fires
+    `onSchemaDrift` exactly once.
+- New UI (`Sources/OpenIslandApp/Views/ClaudeWebUsageSection.swift`):
+  Settings → Setup → "Realtime Web Usage (experimental)" with a
+  feature-flag toggle, cookie paste field, auto-resolved org-id, status
+  badge, and a Refresh-now button. Drift state surfaces as an orange
+  dashed border around the island's usage row.
+- Privacy: covered in `PRIVACY_POLICY.md` ("Optional: Realtime Claude
+  Web Usage" section, both EN and ZH).
+- Tests: 13 new tests in `Tests/OpenIslandCoreTests/ClaudeWebUsageTests.swift`
+  (URLProtocol-mocked client, in-memory cookie store, stub fetcher
+  poller). Suite runs `.serialized` because URLProtocol mocks share
+  global state.
+
+Remaining caveats (per DeepSeek's F1–F5 review):
+- F1 — `extra_usage.is_enabled=true` users may see utilization > 100%.
+  UI not yet stress-tested for that case.
+- F2 — Cookie binds to one workspace; multi-workspace users see only
+  the active one.
+- F3 — Per-model buckets (`seven_day_sonnet`, `seven_day_opus`, etc.)
+  exposed by the API but ignored by OI; only `five_hour` and
+  `seven_day` are surfaced.
+- F4 — Settings has **no** "Test connection" button by design — users
+  shouldn't be able to spam the endpoint.
+- F5 — Web API utilization may drift slightly from `/v1/messages`
+  response-header tier limits since the two pipelines may use different
+  caches. Document this if user-visible.
+
+## Original future plan (kept for context)
+
+
 
 The Claude Desktop Settings → Usage page hits a private Anthropic
 account-usage endpoint. Possible to mirror, but every step is a

@@ -627,6 +627,8 @@ struct IslandPanelView: View {
     @ViewBuilder
     private var openedUsageSummary: some View {
         let providers = openedUsageProviders
+        let driftSuspected = model.claudeWebUsageEnabled
+            && model.claudeWebUsagePollerState.driftSuspected
 
         if providers.isEmpty == false {
             ViewThatFits(in: .horizontal) {
@@ -634,6 +636,18 @@ struct IslandPanelView: View {
                 usageSummaryView(providers, layout: .compact)
                 usageSummaryView(providers, layout: .condensed)
                 usageSummaryView(providers, layout: .minimal)
+            }
+            .padding(.horizontal, driftSuspected ? 6 : 0)
+            .padding(.vertical, driftSuspected ? 2 : 0)
+            .overlay {
+                if driftSuspected {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(
+                            .orange.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                        )
+                        .help("Realtime usage refresh has failed \(model.claudeWebUsagePollerState.consecutiveFailures) times in a row. Numbers may be stale; check Settings → Setup → Realtime Web Usage.")
+                }
             }
         } else {
             HStack(spacing: 8) {

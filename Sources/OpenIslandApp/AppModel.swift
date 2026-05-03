@@ -18,6 +18,8 @@ final class AppModel {
     private static let showCodexUsageDefaultsKey = "app.showCodexUsage"
     private static let completionReplyEnabledDefaultsKey = "feature.completionReply.enabled"
     private static let suppressFrontmostNotificationsDefaultsKey = "app.suppressFrontmostNotifications"
+    private static let claudeWebUsageEnabledDefaultsKey = "claude.webUsage.enabled"
+    private static let claudeWebUsageOrgIDDefaultsKey = "claude.webUsage.orgID"
 
     static let defaultStatusColors: [SessionPhase: String] = [
         .running: "#6E9FFF",
@@ -408,6 +410,88 @@ final class AppModel {
         watchRelay = nil
     }
 
+    // MARK: - Claude Web Usage (realtime, opt-in)
+    //
+    // Pulls Max-plan 5h/7d utilization directly from claude.ai's web API
+    // using the user's session cookie (stored in Keychain). Writes the
+    // raw response into the same statusline cache file the existing
+    // pipeline reads, so the staleness UI / 5s reload loop need no
+    // changes. See docs/usage-freshness-investigation.md.
+
+    var claudeWebUsageEnabled: Bool = false {
+        didSet {
+            guard hasFinishedInit, claudeWebUsageEnabled != oldValue else { return }
+            UserDefaults.standard.set(claudeWebUsageEnabled, forKey: Self.claudeWebUsageEnabledDefaultsKey)
+            if claudeWebUsageEnabled {
+                claudeWebUsagePoller.start()
+            } else {
+                claudeWebUsagePoller.stop()
+            }
+        }
+    }
+
+    var claudeWebUsageOrgID: String = "" {
+        didSet {
+            guard hasFinishedInit, claudeWebUsageOrgID != oldValue else { return }
+            UserDefaults.standard.set(claudeWebUsageOrgID, forKey: Self.claudeWebUsageOrgIDDefaultsKey)
+            let trimmed = claudeWebUsageOrgID.trimmingCharacters(in: .whitespacesAndNewlines)
+            claudeWebUsagePoller.pinnedOrganizationID = trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    private(set) var claudeWebUsagePollerState: ClaudeWebUsagePoller.State = .empty
+    private(set) var claudeWebUsageHasCookie: Bool = false
+
+    @ObservationIgnored
+    private(set) lazy var claudeWebUsageCookieStore: ClaudeWebUsageCookieStoring = ClaudeWebUsageCookieStore()
+
+    @ObservationIgnored
+    private lazy var claudeWebUsagePoller: ClaudeWebUsagePoller = {
+        let p = ClaudeWebUsagePoller(cookieStore: claudeWebUsageCookieStore)
+        p.onStateChange = { [weak self] state in
+            Task { @MainActor in
+                self?.claudeWebUsagePollerState = state
+                if let orgID = state.resolvedOrganizationID,
+                   !orgID.isEmpty,
+                   self?.claudeWebUsageOrgID != orgID {
+                    self?.claudeWebUsageOrgID = orgID
+                }
+            }
+        }
+        return p
+    }()
+
+    func setClaudeWebUsageCookie(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if trimmed.isEmpty {
+                try claudeWebUsageCookieStore.deleteCookie()
+                claudeWebUsageHasCookie = false
+            } else {
+                try claudeWebUsageCookieStore.saveCookie(trimmed)
+                claudeWebUsageHasCookie = true
+                if claudeWebUsageEnabled {
+                    Task { [weak self] in await self?.claudeWebUsagePoller.refreshNow() }
+                }
+            }
+        } catch {
+            lastActionMessage = "Failed to store Claude session cookie: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshClaudeWebUsageNow() {
+        guard claudeWebUsageEnabled else { return }
+        Task { [weak self] in await self?.claudeWebUsagePoller.refreshNow() }
+    }
+
+    private func loadClaudeWebUsageCookieFlag() {
+        do {
+            claudeWebUsageHasCookie = try claudeWebUsageCookieStore.loadCookie() != nil
+        } catch {
+            claudeWebUsageHasCookie = false
+        }
+    }
+
     var ignoresPointerExitDuringHarness = false
     var disablesOverlayEventMonitoringDuringHarness = false
 
@@ -496,6 +580,12 @@ final class AppModel {
         if watchNotificationEnabled {
             startWatchRelay()
         }
+
+        claudeWebUsageEnabled = UserDefaults.standard.bool(forKey: Self.claudeWebUsageEnabledDefaultsKey)
+        claudeWebUsageOrgID = UserDefaults.standard.string(forKey: Self.claudeWebUsageOrgIDDefaultsKey) ?? ""
+        let pinnedOrg = claudeWebUsageOrgID.trimmingCharacters(in: .whitespacesAndNewlines)
+        claudeWebUsagePoller.pinnedOrganizationID = pinnedOrg.isEmpty ? nil : pinnedOrg
+        loadClaudeWebUsageCookieFlag()
 
         overlay.appModel = self
         overlay.restoreDisplayPreference()
@@ -732,6 +822,9 @@ final class AppModel {
             hooks.refreshCursorHookStatus()
             hooks.refreshClaudeUsageState()
             hooks.startClaudeUsageMonitoringIfNeeded()
+            if claudeWebUsageEnabled {
+                claudeWebUsagePoller.start()
+            }
             if showCodexUsage {
                 hooks.refreshCodexUsageState()
                 hooks.startCodexUsageMonitoringIfNeeded()

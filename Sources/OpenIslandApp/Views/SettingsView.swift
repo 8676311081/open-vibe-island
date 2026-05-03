@@ -619,6 +619,8 @@ struct SetupSettingsPane: View {
                 }
             }
 
+            ClaudeWebUsageSection(model: model)
+
             Section(lang.t("setup.section.permissions")) {
                 HStack(alignment: .top) {
                     Label {
