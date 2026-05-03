@@ -871,6 +871,7 @@ struct IslandPanelView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.yellow.opacity(0.55))
                     .accessibilityLabel("Cached \(staleAge)")
+                    .help(usageStalenessTooltip(provider: window.id, age: staleAge))
             }
         }
     }
@@ -934,6 +935,15 @@ struct IslandPanelView: View {
         case 300..<1_800:   return 0.6   // 5–30 min: aging
         default:            return 0.35  // > 30 min: stale
         }
+    }
+
+    private func usageStalenessTooltip(provider: String, age: String) -> String {
+        if provider.hasPrefix("claude-") {
+            return "Cached \(age). Claude usage updates only when Claude Code's interactive statusline receives fresh rate_limits. Claude Desktop and web usage may already be newer."
+        } else if provider.hasPrefix("codex-") {
+            return "Cached \(age). Codex usage is read from local rollout files; numbers refresh on the next assistant turn."
+        }
+        return "Cached \(age)."
     }
 
     private func staleAgeString(since cachedAt: Date) -> String? {
