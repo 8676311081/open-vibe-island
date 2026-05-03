@@ -132,6 +132,13 @@ struct ModelRoutingPane: View {
     @State private var pendingSwitch: UpstreamProfile?
     @State private var configuringProfile: UpstreamProfile?
     @State private var errorBanner: String?
+    /// Snapshot of the health monitor refreshed on appear and after
+    /// each switch. Live updating (proxy degrading WHILE the pane
+    /// is open) is deferred to a future polling-task commit — the
+    /// common case is "user opens pane to debug after noticing
+    /// errors" which appears on entry.
+    @State private var upstreamDegraded: Bool = false
+    @State private var upstreamSampleCount: Int = 0
 
     private var lang: LanguageManager { model.lang }
     private var profileStore: UpstreamProfileStore { model.llmProxy.profileStore }
@@ -143,6 +150,9 @@ struct ModelRoutingPane: View {
                 header
                 if let banner = errorBanner {
                     errorBannerView(banner)
+                }
+                if upstreamDegraded {
+                    healthDegradedBanner
                 }
                 activeStatusRow
                 builtinGrid
@@ -305,8 +315,45 @@ struct ModelRoutingPane: View {
         }
     }
 
+    /// Banner shown when the proxy's recent forwards to the active
+    /// upstream are predominantly failing. Renders a "switch back
+    /// to Anthropic Native" one-click remediation — the safe
+    /// default — alongside the diagnosis text.
+    private var healthDegradedBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(lang.t("modelRouting.health.degraded.title"))
+                    .font(.callout.weight(.semibold))
+                Text(String(
+                    format: lang.t("modelRouting.health.degraded.body"),
+                    upstreamSampleCount
+                ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(lang.t("modelRouting.health.degraded.switchBack")) {
+                switchActive(to: BuiltinProfiles.anthropicNative)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+    }
+
     private func refreshState() {
         hasDeepseekKey = credentialsStore.hasCredential(for: "deepseek")
+        // Health snapshot. Active profile = Anthropic Native means
+        // the user's own credentials are in play; a degraded signal
+        // there points at network / Anthropic-side issues, not at
+        // our routing layer — still surface, just with the same
+        // banner so the user can investigate.
+        let monitor = model.llmProxy.healthMonitor
+        upstreamDegraded = monitor.isDegraded()
+        upstreamSampleCount = monitor.sampleCount()
         // Defensive: surface an error banner if we observe
         // .errorActiveButMissingKey on any built-in.
         for profile in BuiltinProfiles.all {
@@ -520,8 +567,17 @@ private struct KeyConfigSheet: View {
 
     private var lang: LanguageManager { model.lang }
 
+    /// Save-button gate: empty key always blocks; otherwise the
+    /// connection-tester result decides. `.invalidKey` blocks
+    /// (force re-entry); `.rateLimited` / `.upstreamError` /
+    /// `.timeout` allow save (key looks fine, upstream is just
+    /// transiently unhappy); `.networkError` blocks (we never
+    /// reached upstream so we don't know if the key works). Also
+    /// blocks if the key string is too short to be a real key —
+    /// 20 chars is below any real provider's minimum.
     private var canSave: Bool {
-        !keyText.isEmpty && testResult == .valid
+        guard keyText.count >= 20 else { return false }
+        return DeepSeekKeyValidator.saveAllowed(for: testResult)
     }
 
     var body: some View {
@@ -579,16 +635,27 @@ private struct KeyConfigSheet: View {
             case .valid:
                 return (lang.t("modelRouting.keySheet.testSuccess"), .green)
             case .invalidKey:
+                // Hard error — Save stays disabled. Red.
                 return (lang.t("modelRouting.keySheet.testInvalidKey"), .red)
-            case let .unexpectedStatus(code, body):
+            case .rateLimited:
+                // Key works, upstream just rate-limited right now.
+                // Save IS allowed; surface as amber notice.
+                return (lang.t("modelRouting.keySheet.testRateLimited"), .orange)
+            case let .upstreamError(code, body):
+                // 4xx (non-401) or 5xx. Save allowed; user can
+                // retry once upstream recovers.
                 return (
                     String(format: lang.t("modelRouting.keySheet.testFailedStatus"), code, body),
                     .orange
                 )
+            case .timeout:
+                return (lang.t("modelRouting.keySheet.testTimeout"), .orange)
             case let .networkError(message):
+                // No HTTP response at all — block save until we
+                // confirm the key actually reaches upstream.
                 return (
                     String(format: lang.t("modelRouting.keySheet.testFailedNetwork"), message),
-                    .orange
+                    .red
                 )
             }
         }()

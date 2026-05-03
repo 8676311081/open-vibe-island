@@ -328,8 +328,15 @@
 "modelRouting.keySheet.save" = "儲存";
 "modelRouting.keySheet.testSuccess" = "連線成功 — 密鑰有效。";
 "modelRouting.keySheet.testInvalidKey" = "密鑰被拒絕 (HTTP 401)。請檢查是否完整複製。";
-"modelRouting.keySheet.testFailedStatus" = "非預期回應 (HTTP %d)：%@";
+"modelRouting.keySheet.testRateLimited" = "密鑰有效但帳戶當前限速。可以儲存，稍後重試。";
+"modelRouting.keySheet.testFailedStatus" = "上游回傳 HTTP %d：%@";
+"modelRouting.keySheet.testTimeout" = "連線超時。請檢查網路；密鑰可能仍然有效。";
 "modelRouting.keySheet.testFailedNetwork" = "網路錯誤：%@";
+
+/* 路由健康狀態 banner */
+"modelRouting.health.degraded.title" = "當前上游連線異常";
+"modelRouting.health.degraded.body" = "最近 %d 次請求超過 80%% 失敗。若非暫時性問題，建議切回 Anthropic Native。";
+"modelRouting.health.degraded.switchBack" = "切回 Anthropic";
 
 /* 通用 */
 "common.cancel" = "取消";

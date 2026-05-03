@@ -359,8 +359,15 @@
 "modelRouting.keySheet.save" = "保存";
 "modelRouting.keySheet.testSuccess" = "连接成功 — 密钥有效。";
 "modelRouting.keySheet.testInvalidKey" = "密钥被拒绝 (HTTP 401)。请检查是否复制完整。";
-"modelRouting.keySheet.testFailedStatus" = "意外响应 (HTTP %d)：%@";
+"modelRouting.keySheet.testRateLimited" = "密钥有效但账户当前限速。可以保存，稍后重试。";
+"modelRouting.keySheet.testFailedStatus" = "上游返回 HTTP %d：%@";
+"modelRouting.keySheet.testTimeout" = "连接超时。请检查网络；密钥可能仍然有效。";
 "modelRouting.keySheet.testFailedNetwork" = "网络错误：%@";
+
+/* 路由健康状态 banner */
+"modelRouting.health.degraded.title" = "当前上游连接异常";
+"modelRouting.health.degraded.body" = "最近 %d 次请求超过 80%% 失败。如果不是暂时性问题，建议切回 Anthropic Native。";
+"modelRouting.health.degraded.switchBack" = "切回 Anthropic";
 
 /* 通用 */
 "common.cancel" = "取消";

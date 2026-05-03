@@ -360,8 +360,15 @@
 "modelRouting.keySheet.save" = "Save";
 "modelRouting.keySheet.testSuccess" = "Connection OK — key accepted.";
 "modelRouting.keySheet.testInvalidKey" = "Key was rejected (HTTP 401). Check that you copied the full string.";
-"modelRouting.keySheet.testFailedStatus" = "Unexpected response (HTTP %d): %@";
+"modelRouting.keySheet.testRateLimited" = "Key is valid but the account is rate-limited. Save and retry in a moment.";
+"modelRouting.keySheet.testFailedStatus" = "Upstream returned HTTP %d: %@";
+"modelRouting.keySheet.testTimeout" = "Connection timed out. Check your network; the key may still be valid.";
 "modelRouting.keySheet.testFailedNetwork" = "Network error: %@";
+
+/* Routing health banner */
+"modelRouting.health.degraded.title" = "Active upstream looks degraded";
+"modelRouting.health.degraded.body" = "More than 80%% of the last %d requests failed. Switch back to Anthropic Native if this isn't temporary.";
+"modelRouting.health.degraded.switchBack" = "Switch to Anthropic";
 
 /* Common */
 "common.cancel" = "Cancel";

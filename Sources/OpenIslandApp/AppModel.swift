@@ -658,9 +658,12 @@ final class AppModel {
     /// SwiftUI view bound to AppModel redraws — without us having to
     /// make `UpstreamProfileStore` itself Observable (which would
     /// force async on the proxy hot path; see store-file rationale).
+    /// Also resets the health monitor so the new upstream isn't
+    /// instantly judged by the old one's reliability window.
     func setActiveUpstreamProfile(_ id: String) throws {
         try llmProxy.profileStore.setActiveProfile(id)
         activeUpstreamProfileId = id
+        llmProxy.healthMonitor.reset()
     }
 
     func toggleLLMProxy() {

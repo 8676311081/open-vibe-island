@@ -24,27 +24,39 @@ public struct DeepSeekKeyValidator: Sendable {
     public enum Result: Sendable, Equatable {
         case valid
         /// HTTP 401 — the key reached upstream and was explicitly
-        /// rejected. Distinct from `unexpectedStatus` because UI
-        /// has a specific message for it ("Key was rejected; check
-        /// you copied the full string").
+        /// rejected. Distinct path because UI must force the user
+        /// to re-enter the key (Save button stays disabled).
         case invalidKey
-        /// Any non-2xx, non-401 status. `body` is up to 200 chars of
-        /// upstream response (truncated) so the routing pane can
-        /// surface concrete diagnosis text instead of "failed".
-        case unexpectedStatus(code: Int, body: String)
-        /// Networking failure (DNS, TLS, timeout). Argument is
-        /// `error.localizedDescription`.
+        /// HTTP 429 — key is valid but the account is rate-limited
+        /// right now. Save IS allowed (the key works, the user just
+        /// needs to wait); UI surfaces an amber notice rather than
+        /// a hard error.
+        case rateLimited
+        /// Any 5xx upstream response. `body` is up to 200 chars of
+        /// upstream response (truncated). Save IS allowed because
+        /// the upstream is at fault, not the key — saving lets the
+        /// user retry without re-typing the secret.
+        case upstreamError(code: Int, body: String)
+        /// Connection timed out (URLError.timedOut). Save allowed
+        /// for the same reason as upstreamError — transient network
+        /// state shouldn't force key re-entry.
+        case timeout
+        /// Networking failure that's neither timeout nor an HTTP
+        /// response (DNS failure, TLS handshake error, etc.).
         case networkError(message: String)
     }
 
     public let endpointURL: URL
+    public let timeout: TimeInterval
     private let session: URLSession
 
     public init(
         endpointURL: URL = DeepSeekKeyValidator.defaultEndpointURL,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        timeout: TimeInterval = 10
     ) {
         self.endpointURL = endpointURL
+        self.timeout = timeout
         self.session = session
     }
 
@@ -58,6 +70,10 @@ public struct DeepSeekKeyValidator: Sendable {
         // Anthropic protocol header. DeepSeek's /anthropic endpoint
         // mirrors the same versioning contract.
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        // Per-request timeout for the probe. Short by design: the
+        // routing pane shouldn't make the user wait the URLSession
+        // default (60 s) when the upstream is unreachable.
+        request.timeoutInterval = timeout
 
         // Minimal body. `max_tokens: 1` keeps cost ~zero; the user
         // pays for at most one output token even on success.
@@ -84,11 +100,37 @@ public struct DeepSeekKeyValidator: Sendable {
                 return .valid
             case 401:
                 return .invalidKey
+            case 429:
+                return .rateLimited
+            case 500..<600:
+                return .upstreamError(code: http.statusCode, body: snippet())
             default:
-                return .unexpectedStatus(code: http.statusCode, body: snippet())
+                // Treat unfamiliar 4xx (other than 401/429) as
+                // upstream-error too — we have no UI category for
+                // them and this matches the "save is OK" semantics
+                // (the *key* isn't the problem).
+                return .upstreamError(code: http.statusCode, body: snippet())
             }
+        } catch let urlError as URLError where urlError.code == .timedOut {
+            return .timeout
         } catch {
             return .networkError(message: error.localizedDescription)
+        }
+    }
+
+    /// Save-button gate used by the key-config sheet. `nil` (no test
+    /// run yet) and `.invalidKey` block save; everything else allows
+    /// it. `.rateLimited` / `.upstreamError` / `.timeout` are
+    /// transient upstream conditions where the key itself is fine —
+    /// forcing the user to re-type the secret in those cases is
+    /// hostile UX.
+    public static func saveAllowed(for result: Result?) -> Bool {
+        guard let result else { return false }
+        switch result {
+        case .valid, .rateLimited, .upstreamError, .timeout:
+            return true
+        case .invalidKey, .networkError:
+            return false
         }
     }
 }

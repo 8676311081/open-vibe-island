@@ -28,6 +28,11 @@ final class LLMProxyCoordinator {
     /// owner per coordinator so active-profile state and custom-
     /// profile mutations don't get reset on `rebuildServer()`.
     let profileStore: UpstreamProfileStore
+    /// Sliding-window health metric for the active upstream. Resets
+    /// on profile switch (the previous upstream's bad day has nothing
+    /// to say about the new one). Read by `ModelRoutingPane` to
+    /// surface a "your upstream looks broken" banner.
+    let healthMonitor: LLMUpstreamHealthMonitor
     private(set) var isRunning = false
 
     var port: UInt16 { server.configuration.port }
@@ -37,12 +42,15 @@ final class LLMProxyCoordinator {
     init() {
         let credentials = RouterCredentialsStore.live()
         let profiles = UpstreamProfileStore()
+        let health = LLMUpstreamHealthMonitor()
         self.credentialsStore = credentials
         self.profileStore = profiles
+        self.healthMonitor = health
         self.server = LLMProxyServer(
             configuration: Self.makeConfiguration(),
             credentialsStore: credentials,
-            profileResolver: profiles
+            profileResolver: profiles,
+            healthMonitor: health
         )
         let store = LLMStatsStore()
         self.statsStore = store
@@ -134,7 +142,8 @@ final class LLMProxyCoordinator {
         self.server = LLMProxyServer(
             configuration: Self.makeConfiguration(),
             credentialsStore: credentialsStore,
-            profileResolver: profileStore
+            profileResolver: profileStore,
+            healthMonitor: healthMonitor
         )
         if wasRunning { start() }
     }

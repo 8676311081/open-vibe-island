@@ -108,16 +108,23 @@ public final class LLMProxyServer: @unchecked Sendable {
     /// resolver means we have no way to decide which profile applies,
     /// and a missing store means we have no way to read the key).
     private let profileResolver: (any UpstreamProfileResolver)?
+    /// Sliding-window outcome recorder consumed by the routing pane
+    /// to surface "your active upstream is degraded" banners. `nil`
+    /// disables recording — preserves test ergonomics for
+    /// integration suites that don't care about health metrics.
+    private let healthMonitor: LLMUpstreamHealthMonitor?
 
     public init(
         configuration: LLMProxyConfiguration = .default,
         additionalProtocolClasses: [AnyClass] = [],
         credentialsStore: RouterCredentialsStore? = nil,
-        profileResolver: (any UpstreamProfileResolver)? = nil
+        profileResolver: (any UpstreamProfileResolver)? = nil,
+        healthMonitor: LLMUpstreamHealthMonitor? = nil
     ) {
         self.configuration = configuration
         self.credentialsStore = credentialsStore
         self.profileResolver = profileResolver
+        self.healthMonitor = healthMonitor
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         cfg.timeoutIntervalForRequest = 600     // SSE streams can idle a while
@@ -475,6 +482,7 @@ public final class LLMProxyServer: @unchecked Sendable {
             connection: state.connection,
             queue: queue,
             observer: observer,
+            healthMonitor: healthMonitor,
             logger: Self.logger
         )
         sessionDelegate.register(task: task, handler: handler)
@@ -632,25 +640,36 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     let connection: NWConnection
     let queue: DispatchQueue
     weak var observer: (any LLMProxyObserver)?
+    /// Strong reference (not weak): the monitor's lifetime is tied
+    /// to LLMProxyCoordinator and outlives any single request, so
+    /// holding it from the per-task handler is fine and avoids the
+    /// nil-during-callback race a weak reference would create.
+    let healthMonitor: LLMUpstreamHealthMonitor?
     let logger: Logger
     private var sentHeaders = false
+    /// Last HTTP status the upstream returned. Drives the
+    /// success/failure decision in `handleCompletion`.
+    private var lastSeenStatus: Int?
 
     init(
         context: LLMProxyRequestContext,
         connection: NWConnection,
         queue: DispatchQueue,
         observer: (any LLMProxyObserver)?,
+        healthMonitor: LLMUpstreamHealthMonitor?,
         logger: Logger
     ) {
         self.context = context
         self.connection = connection
         self.queue = queue
         self.observer = observer
+        self.healthMonitor = healthMonitor
         self.logger = logger
     }
 
     func handleResponseHead(_ resp: HTTPURLResponse) {
         let status = resp.statusCode
+        lastSeenStatus = status
         var headers: [(name: String, value: String)] = []
         var lower: [String: String] = [:]
         for (key, value) in resp.allHeaderFields {
@@ -727,6 +746,19 @@ private final class ProxyTaskHandler: @unchecked Sendable {
             let ctx = context
             let err = error
             Task { await captured.proxy(ctx, didCompleteWithError: err) }
+        }
+        // Health metric: success = no transport error AND a 2xx/3xx
+        // upstream status. 4xx/5xx counts as failure (the user's
+        // request did get to the upstream but the upstream told us
+        // something went wrong — for routing-pane purposes that's
+        // still a degraded experience). No status seen at all (e.g.
+        // DNS failure, TCP reset) also counts as failure.
+        if let monitor = healthMonitor {
+            let ok: Bool = {
+                guard error == nil, let status = lastSeenStatus else { return false }
+                return (200..<400).contains(status)
+            }()
+            monitor.record(success: ok)
         }
     }
 }
