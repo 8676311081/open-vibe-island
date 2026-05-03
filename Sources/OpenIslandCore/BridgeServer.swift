@@ -1118,36 +1118,50 @@ public final class BridgeServer: @unchecked Sendable {
             ensureCursorSessionExists(for: payload)
             synchronizeCursorJumpTarget(for: payload)
             synchronizeCursorMetadata(for: payload)
-            let shellSummary = payload.commandPreview.map { "Running: \($0)" } ?? "Running shell command"
             emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
+                .permissionRequested(
+                    PermissionRequested(
                         sessionID: payload.sessionID,
-                        summary: shellSummary,
-                        phase: .running,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.cwd ?? "",
+                            primaryActionTitle: "Allow Once",
+                            secondaryActionTitle: "Deny"
+                        ),
                         timestamp: .now
                     )
                 )
             )
-            send(.response(.cursorHookDirective(CursorHookDirective(permission: .allow))), to: clientID)
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
 
         case .beforeMCPExecution:
             clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
             ensureCursorSessionExists(for: payload)
             synchronizeCursorJumpTarget(for: payload)
             synchronizeCursorMetadata(for: payload)
-            let mcpSummary = payload.toolName.map { "Calling \($0)" } ?? "Calling MCP tool"
             emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
+                .permissionRequested(
+                    PermissionRequested(
                         sessionID: payload.sessionID,
-                        summary: mcpSummary,
-                        phase: .running,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.workspaceRoots.first ?? "",
+                            primaryActionTitle: "Allow Once",
+                            secondaryActionTitle: "Deny"
+                        ),
                         timestamp: .now
                     )
                 )
             )
-            send(.response(.cursorHookDirective(CursorHookDirective(permission: .allow))), to: clientID)
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
 
         case .beforeReadFile:
             clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
