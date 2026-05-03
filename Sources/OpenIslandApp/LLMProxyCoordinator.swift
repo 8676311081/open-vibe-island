@@ -19,6 +19,11 @@ final class LLMProxyCoordinator {
     private var server: LLMProxyServer
     let statsStore: LLMStatsStore
     let usageObserver: LLMUsageObserver
+    /// Keychain-backed credential store for non-Anthropic upstreams.
+    /// Lives at the coordinator (not on each rebuilt server) so the
+    /// underlying Keychain handle survives `rebuildServer()` and
+    /// stays consistent across upstream URL changes.
+    let credentialsStore: RouterCredentialsStore
     private(set) var isRunning = false
 
     var port: UInt16 { server.configuration.port }
@@ -26,7 +31,12 @@ final class LLMProxyCoordinator {
     var anthropicUpstream: URL { server.configuration.anthropicUpstream }
 
     init() {
-        self.server = LLMProxyServer(configuration: Self.makeConfiguration())
+        let credentials = RouterCredentialsStore.live()
+        self.credentialsStore = credentials
+        self.server = LLMProxyServer(
+            configuration: Self.makeConfiguration(),
+            credentialsStore: credentials
+        )
         let store = LLMStatsStore()
         self.statsStore = store
         self.usageObserver = LLMUsageObserver(store: store)
@@ -114,7 +124,10 @@ final class LLMProxyCoordinator {
     private func rebuildServer() {
         let wasRunning = isRunning
         if wasRunning { stop() }
-        self.server = LLMProxyServer(configuration: Self.makeConfiguration())
+        self.server = LLMProxyServer(
+            configuration: Self.makeConfiguration(),
+            credentialsStore: credentialsStore
+        )
         if wasRunning { start() }
     }
 }

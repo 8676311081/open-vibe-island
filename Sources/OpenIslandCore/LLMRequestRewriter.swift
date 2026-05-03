@@ -1,34 +1,51 @@
 import Foundation
 
-/// THE ONE PERMITTED BODY MUTATION.
+/// Audited mutations the proxy is allowed to make to an in-flight
+/// request. The proxy is otherwise an opaque forwarder — anything
+/// not listed below MUST pass through bit-for-bit. New entries
+/// require an explicit commit + audit-trail update.
 ///
-/// The proxy is otherwise an opaque forwarder — bodies pass through
-/// verbatim. This file is the single sanctioned exception, and it is
-/// scoped tightly: only OpenAI's `/v1/chat/completions`, only when the
-/// request asked for streaming, only when the client did not already
-/// state a preference about `stream_options.include_usage`.
+/// 1. **Strip incoming `Accept-Encoding` and force `identity`** —
+///    URLSession transparently gunzips response bodies but leaves
+///    `Content-Encoding: gzip` in the headers, breaking any
+///    downstream client that respects the header. Forcing identity
+///    upstream guarantees what URLSession hands us is what upstream
+///    sent. Lives at the call site in `LLMProxyServer` (header
+///    forwarding loop) rather than this file because it doesn't
+///    need any context — just an unconditional override per request.
 ///
-/// **Why** the exception exists: OpenAI's chat/completions streaming
-/// endpoint omits the final `usage` block unless the request opted in
-/// via `stream_options: {include_usage: true}`. Codex CLI's recent
-/// versions opt in by default; older clients and ad-hoc tools may not.
-/// Without this hint we cannot keep token stats honest, so we add it.
+/// 2. **Inject `stream_options.include_usage = true` on OpenAI
+///    streaming `/v1/chat/completions`** — chat/completions omits
+///    the final `usage` block unless this opt-in is set. Without
+///    it our token stats lose every chat/completions stream that
+///    a non-Codex client opens. Bit-for-bit identical otherwise; a
+///    client that explicitly set `include_usage: false` is
+///    respected. See `rewrittenChatCompletionsBody`.
 ///
-/// **What** we do not touch: the request stays bit-for-bit identical
-/// in every other respect — model, messages, temperature, tools, all
-/// preserved. We only set a single key inside `stream_options`. If the
-/// client explicitly set `include_usage: false`, we respect that.
+/// 3. **Rewrite `Authorization` header for non-Anthropic upstreams
+///    that speak Anthropic format** — when user has pointed
+///    `anthropicUpstream` at e.g. `api.deepseek.com/anthropic`, the
+///    Bearer token claude CLI sends is the user's Anthropic key,
+///    not the DeepSeek key. We replace it with the Keychain-stored
+///    credential for the matched provider so the request reaches
+///    the right backend with the right credential. Fail-open: if
+///    the upstream looks non-Anthropic but we have no stored key
+///    for that provider, do NOT replace — let the upstream return
+///    401 so the misconfiguration is loud. See
+///    `rewriteAuthorizationIfNeeded`.
 ///
-/// If you ever feel tempted to add a second mutation here, push back.
-/// The proxy's value comes from being passive; observability that
-/// distorts traffic is worse than no observability at all.
+/// 4. **(RESERVED for 4.x)** Rewrite request body `model` field
+///    when active profile is a DeepSeek V4 Pro/Flash variant
+///    sharing the same endpoint. Stub-only in this commit.
+///
+/// **What we do not touch:** message content, tool definitions,
+/// temperature, system prompts, model selection (outside item #4),
+/// any non-listed header. Observability that distorts traffic is
+/// worse than no observability at all.
 public enum LLMRequestRewriter {
-    /// Path-based gate. Only chat/completions needs the hint:
-    ///   * Anthropic /v1/messages always emits `message_start` with
-    ///     `usage.input_tokens`.
-    ///   * OpenAI /v1/responses always returns a `response.completed`
-    ///     event with `usage` in the envelope.
-    ///   * OpenAI /v1/chat/completions is the outlier.
+    /// Path-based gate. Only chat/completions needs the body
+    /// rewrite — Anthropic `/v1/messages` and OpenAI `/v1/responses`
+    /// emit usage unconditionally.
     public static func shouldRewrite(path: String) -> Bool {
         path.lowercased().hasPrefix("/v1/chat/completions")
     }
@@ -51,5 +68,67 @@ public enum LLMRequestRewriter {
             return body
         }
         return rewritten
+    }
+
+    /// Mutate `headers` in place: when the upstream URL matches a
+    /// known non-Anthropic provider AND the corresponding credential
+    /// is in `credentialsStore`, replace any `Authorization` header
+    /// (case-insensitive name match) with `Bearer <stored-key>`. If
+    /// no header exists, append one. Multiple existing case-variant
+    /// `Authorization` headers collapse to a single override.
+    ///
+    /// **No-op cases** (caller-side header passes through unchanged):
+    /// - Upstream host is Anthropic (or anything not in the
+    ///   provider table)
+    /// - Upstream matches a known provider but no key is stored —
+    ///   fail-open, so the upstream's 401 surfaces the
+    ///   misconfiguration instead of us silently sending an empty
+    ///   token
+    /// - Upstream URL has no host (degenerate / file URL)
+    ///
+    /// **4.1 placeholder:** the provider table is hardcoded to
+    /// `api.deepseek.com → "deepseek"`. 4.2 replaces this branch
+    /// with a `UpstreamProfile` lookup so adding a new backend
+    /// becomes config rather than code.
+    public static func rewriteAuthorizationIfNeeded(
+        _ headers: inout [(name: String, value: String)],
+        upstreamURL: URL,
+        credentialsStore: RouterCredentialsStore
+    ) {
+        guard let host = upstreamURL.host?.lowercased() else { return }
+        let account: String?
+        switch host {
+        case "api.deepseek.com":
+            account = "deepseek"
+        default:
+            account = nil
+        }
+        guard let account else { return }
+        // `try?` flattens `throws -> String?` to `String?` (SE-0230),
+        // so a thrown Keychain error and a missing-key both surface
+        // as nil here. Both should fail-open: surface as a request
+        // failure would be worse UX than letting upstream 401 expose
+        // the misconfiguration.
+        guard let key = try? credentialsStore.credential(for: account), !key.isEmpty else {
+            return
+        }
+        let newValue = "Bearer \(key)"
+        if let firstIdx = headers.firstIndex(where: { $0.name.lowercased() == "authorization" }) {
+            headers[firstIdx] = (name: headers[firstIdx].name, value: newValue)
+            // Strip any further duplicate Authorization headers (HTTP
+            // allows multi-value headers, but Authorization is
+            // conventionally single — sending two would confuse the
+            // upstream). Iterate from the right so removals don't
+            // shift indices we still need.
+            var i = headers.count - 1
+            while i > firstIdx {
+                if headers[i].name.lowercased() == "authorization" {
+                    headers.remove(at: i)
+                }
+                i -= 1
+            }
+        } else {
+            headers.append((name: "Authorization", value: newValue))
+        }
     }
 }

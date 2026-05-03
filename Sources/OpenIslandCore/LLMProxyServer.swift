@@ -96,12 +96,21 @@ public final class LLMProxyServer: @unchecked Sendable {
     private var observer: (any LLMProxyObserver)?
     private let session: URLSession
     private let sessionDelegate: ProxyURLSessionDelegate
+    /// Used by `LLMRequestRewriter.rewriteAuthorizationIfNeeded` to
+    /// look up the per-provider Keychain credential when the upstream
+    /// is non-Anthropic (e.g. DeepSeek). `nil` disables the rewrite —
+    /// existing tests construct the server without this dependency
+    /// because they target `api.anthropic.com` (or a stubbed protocol
+    /// class) and don't need provider key lookup.
+    private let credentialsStore: RouterCredentialsStore?
 
     public init(
         configuration: LLMProxyConfiguration = .default,
-        additionalProtocolClasses: [AnyClass] = []
+        additionalProtocolClasses: [AnyClass] = [],
+        credentialsStore: RouterCredentialsStore? = nil
     ) {
         self.configuration = configuration
+        self.credentialsStore = credentialsStore
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         cfg.timeoutIntervalForRequest = 600     // SSE streams can idle a while
@@ -419,7 +428,21 @@ public final class LLMProxyServer: @unchecked Sendable {
         }
         var req = URLRequest(url: url)
         req.httpMethod = context.method
-        for (name, value) in context.requestHeaders {
+        // Apply audited header mutations to a mutable copy of the
+        // incoming headers BEFORE forwarding. See LLMRequestRewriter
+        // for the full audit list. Currently the only rewrite this
+        // gates is the Authorization-for-DeepSeek path; if
+        // `credentialsStore` is nil (no provider routing wired) it's
+        // a no-op.
+        var forwardHeaders = context.requestHeaders
+        if let store = credentialsStore {
+            LLMRequestRewriter.rewriteAuthorizationIfNeeded(
+                &forwardHeaders,
+                upstreamURL: url,
+                credentialsStore: store
+            )
+        }
+        for (name, value) in forwardHeaders {
             let lower = name.lowercased()
             if LLMProxyHTTP.hopByHopHeaders.contains(lower) { continue }
             if lower == "host" { continue }            // URLSession sets Host
