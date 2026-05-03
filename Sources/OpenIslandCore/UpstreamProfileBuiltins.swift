@@ -60,7 +60,9 @@ public enum BuiltinProfiles {
             outputUSDPerMtok: 0.87,
             cacheReadUSDPerMtok: 0.003625,
             contextWindowTokens: 1_000_000,
-            discountExpiresAt: deepseekV4DiscountExpiresAt
+            discountExpiresAt: deepseekV4DiscountExpiresAt,
+            listInputUSDPerMtok: 1.74,    // 75%-off discount removed
+            listOutputUSDPerMtok: 3.48
         )
     )
 
@@ -78,7 +80,9 @@ public enum BuiltinProfiles {
             outputUSDPerMtok: 0.28,
             cacheReadUSDPerMtok: 0.0028,
             contextWindowTokens: 1_000_000,
-            discountExpiresAt: deepseekV4DiscountExpiresAt
+            discountExpiresAt: deepseekV4DiscountExpiresAt,
+            listInputUSDPerMtok: 0.56,    // 75%-off discount removed
+            listOutputUSDPerMtok: 1.12
         )
     )
 

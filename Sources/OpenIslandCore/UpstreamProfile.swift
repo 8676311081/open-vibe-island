@@ -5,9 +5,15 @@ import Foundation
 /// because Custom profiles created by the user may not have
 /// reliable cost data.
 public struct ProfileCostMetadata: Codable, Sendable, Equatable {
-    /// USD per million input tokens (uncached fresh write).
+    /// USD per million input tokens (uncached fresh write). When
+    /// `discountExpiresAt` is set, this is the discounted price
+    /// shown today; the post-expiry "list" price lives in
+    /// `listInputUSDPerMtok` so the UI can surface "discount
+    /// expires in N days, list price will be $X" without a code
+    /// update at expiry time.
     public let inputUSDPerMtok: Double
-    /// USD per million output tokens.
+    /// USD per million output tokens. See `inputUSDPerMtok` for
+    /// discount semantics.
     public let outputUSDPerMtok: Double
     /// USD per million cache_read tokens. `nil` when the provider
     /// does not support prompt caching at all (UI renders "no cache"
@@ -23,19 +29,52 @@ public struct ProfileCostMetadata: Codable, Sendable, Equatable {
     /// chip during the last 30 days, after which the source-of-
     /// truth prices need a code update + new release.
     public let discountExpiresAt: Date?
+    /// Post-expiry list price for input tokens (USD/Mtok). 0 = no
+    /// list price specified (e.g. providers without time-limited
+    /// discounts; their `inputUSDPerMtok` is already the list).
+    /// Decoded with `?? 0` for backward compat with profiles
+    /// serialized before this field was added.
+    public let listInputUSDPerMtok: Double
+    /// Post-expiry list price for output tokens. Same semantics as
+    /// `listInputUSDPerMtok`.
+    public let listOutputUSDPerMtok: Double
 
     public init(
         inputUSDPerMtok: Double,
         outputUSDPerMtok: Double,
         cacheReadUSDPerMtok: Double? = nil,
         contextWindowTokens: Int,
-        discountExpiresAt: Date? = nil
+        discountExpiresAt: Date? = nil,
+        listInputUSDPerMtok: Double = 0,
+        listOutputUSDPerMtok: Double = 0
     ) {
         self.inputUSDPerMtok = inputUSDPerMtok
         self.outputUSDPerMtok = outputUSDPerMtok
         self.cacheReadUSDPerMtok = cacheReadUSDPerMtok
         self.contextWindowTokens = contextWindowTokens
         self.discountExpiresAt = discountExpiresAt
+        self.listInputUSDPerMtok = listInputUSDPerMtok
+        self.listOutputUSDPerMtok = listOutputUSDPerMtok
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case inputUSDPerMtok, outputUSDPerMtok, cacheReadUSDPerMtok
+        case contextWindowTokens, discountExpiresAt
+        case listInputUSDPerMtok, listOutputUSDPerMtok
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.inputUSDPerMtok = try c.decode(Double.self, forKey: .inputUSDPerMtok)
+        self.outputUSDPerMtok = try c.decode(Double.self, forKey: .outputUSDPerMtok)
+        self.cacheReadUSDPerMtok = try c.decodeIfPresent(Double.self, forKey: .cacheReadUSDPerMtok)
+        self.contextWindowTokens = try c.decode(Int.self, forKey: .contextWindowTokens)
+        self.discountExpiresAt = try c.decodeIfPresent(Date.self, forKey: .discountExpiresAt)
+        // Backward compat: pre-4.3 serialized profiles lack these
+        // fields. `?? 0` keeps the existing custom profiles in
+        // UserDefaults loadable.
+        self.listInputUSDPerMtok = try c.decodeIfPresent(Double.self, forKey: .listInputUSDPerMtok) ?? 0
+        self.listOutputUSDPerMtok = try c.decodeIfPresent(Double.self, forKey: .listOutputUSDPerMtok) ?? 0
     }
 }
 

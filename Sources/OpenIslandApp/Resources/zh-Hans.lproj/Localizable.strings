@@ -316,3 +316,51 @@
 "modelRouting.profile.anthropic.native" = "Anthropic 原生";
 "modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
 "modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";
+
+/* 模型路由面板 — 侧栏标签 + 主体 */
+"settings.modelRouting" = "模型路由";
+"modelRouting.title" = "模型路由";
+"modelRouting.description" = "选择处理 Anthropic 格式 API 请求的实际后端。";
+
+/* 当前激活状态行 */
+"modelRouting.activeStatus" = "当前：";
+"modelRouting.activeStatus.passthrough" = "Authorization 直接透传。";
+"modelRouting.activeStatus.rewrite" = "Authorization 会被替换为该 provider 的 Keychain 密钥。";
+
+/* 模型卡片 */
+"modelRouting.card.cost" = "输入 $%.3f / 输出 $%.3f / Mtok";
+"modelRouting.card.context" = "上下文：%d tokens";
+"modelRouting.card.cacheSupported" = "✓ 支持 prompt cache";
+"modelRouting.card.activeBadge" = "激活";
+"modelRouting.card.action.activate" = "切换到此 →";
+"modelRouting.card.action.configure" = "配置 API key →";
+"modelRouting.card.action.error" = "配置异常";
+"modelRouting.card.custom.title" = "自定义";
+"modelRouting.card.custom.description" = "添加你自己的上游 URL 和密钥。";
+"modelRouting.card.custom.add" = "+ 添加 (下个版本)";
+"modelRouting.custom.comingSoon" = "自定义 profile 编辑功能将在下个版本上线。";
+"modelRouting.customSectionTitle" = "自定义 profile";
+"modelRouting.error.activeKeyMissing" = "当前激活的 profile 缺少 API key。请切换到已配置的 profile。";
+"modelRouting.discount.daysRemaining" = "折扣剩 %d 天";
+
+/* 切换确认 sheet */
+"modelRouting.confirmSheet.title" = "切换路由到 %@?";
+"modelRouting.confirmSheet.bodyCacheLost" = "切换会让当前 prompt cache 失效。";
+"modelRouting.confirmSheet.bodyPricing" = "下一轮请求会按新 provider 全价计费，cache 重新积累需要 5-10 轮对话。";
+"modelRouting.confirmSheet.bodyHistorySafe" = "本地对话历史不会丢失，只是服务端 cache prefix 会从零开始。";
+"modelRouting.confirmSheet.continue" = "切换";
+
+/* API key 配置 sheet */
+"modelRouting.keySheet.title" = "配置 %@ API key";
+"modelRouting.keySheet.body" = "Open Island 将 key 加密存储在 macOS Keychain，不会写入任何配置文件的明文。";
+"modelRouting.keySheet.signupLink" = "→ 在 platform.deepseek.com 注册";
+"modelRouting.keySheet.placeholder" = "API key";
+"modelRouting.keySheet.testConnection" = "测试连接";
+"modelRouting.keySheet.save" = "保存";
+"modelRouting.keySheet.testSuccess" = "连接成功 — 密钥有效。";
+"modelRouting.keySheet.testInvalidKey" = "密钥被拒绝 (HTTP 401)。请检查是否复制完整。";
+"modelRouting.keySheet.testFailedStatus" = "意外响应 (HTTP %d)：%@";
+"modelRouting.keySheet.testFailedNetwork" = "网络错误：%@";
+
+/* 通用 */
+"common.cancel" = "取消";

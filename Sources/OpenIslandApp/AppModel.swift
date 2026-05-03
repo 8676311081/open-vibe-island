@@ -620,6 +620,14 @@ final class AppModel {
         showSettings()
     }
 
+    /// Deep-link the Settings window straight to the Model Routing
+    /// pane. Wired from the future compact-island chip (4.4) and from
+    /// any toast that needs to invite the user to configure routing.
+    func openModelRouting() {
+        selectedSettingsTab = .modelRouting
+        showSettings()
+    }
+
     func toggleLLMProxy() {
         if llmProxy.isRunning {
             llmProxy.stop()

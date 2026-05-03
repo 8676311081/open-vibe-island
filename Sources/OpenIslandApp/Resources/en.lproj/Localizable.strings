@@ -317,3 +317,51 @@
 "modelRouting.profile.anthropic.native" = "Anthropic Native";
 "modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
 "modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";
+
+/* Model routing pane — sidebar label + body */
+"settings.modelRouting" = "Model Routing";
+"modelRouting.title" = "Model Routing";
+"modelRouting.description" = "Choose which backend handles Anthropic-format API requests.";
+
+/* Active status row */
+"modelRouting.activeStatus" = "Active:";
+"modelRouting.activeStatus.passthrough" = "Authorization passes through as-is.";
+"modelRouting.activeStatus.rewrite" = "Authorization is rewritten with the stored credential for this provider.";
+
+/* Profile cards */
+"modelRouting.card.cost" = "Input $%.3f / Output $%.3f / Mtok";
+"modelRouting.card.context" = "Context: %d tokens";
+"modelRouting.card.cacheSupported" = "✓ Prompt cache supported";
+"modelRouting.card.activeBadge" = "Active";
+"modelRouting.card.action.activate" = "Switch to this →";
+"modelRouting.card.action.configure" = "Configure API key →";
+"modelRouting.card.action.error" = "Configuration error";
+"modelRouting.card.custom.title" = "Custom";
+"modelRouting.card.custom.description" = "Add your own upstream URL and credential.";
+"modelRouting.card.custom.add" = "+ Add (next release)";
+"modelRouting.custom.comingSoon" = "Custom profile editing ships in the next release.";
+"modelRouting.customSectionTitle" = "Custom profiles";
+"modelRouting.error.activeKeyMissing" = "Active profile is missing its API key. Switch to a configured profile or remove the active selection.";
+"modelRouting.discount.daysRemaining" = "Discount %d d";
+
+/* Switch confirm sheet */
+"modelRouting.confirmSheet.title" = "Switch routing to %@?";
+"modelRouting.confirmSheet.bodyCacheLost" = "Switching invalidates your current prompt cache.";
+"modelRouting.confirmSheet.bodyPricing" = "The next request is billed at full price; cache prefix takes 5–10 turns to rebuild on the new provider.";
+"modelRouting.confirmSheet.bodyHistorySafe" = "Your local conversation history is preserved; only the server-side cache prefix resets.";
+"modelRouting.confirmSheet.continue" = "Switch";
+
+/* Key config sheet */
+"modelRouting.keySheet.title" = "Configure %@ API key";
+"modelRouting.keySheet.body" = "Open Island stores the key in your macOS Keychain. Nothing is written to disk in cleartext.";
+"modelRouting.keySheet.signupLink" = "→ Sign up at platform.deepseek.com";
+"modelRouting.keySheet.placeholder" = "API key";
+"modelRouting.keySheet.testConnection" = "Test connection";
+"modelRouting.keySheet.save" = "Save";
+"modelRouting.keySheet.testSuccess" = "Connection OK — key accepted.";
+"modelRouting.keySheet.testInvalidKey" = "Key was rejected (HTTP 401). Check that you copied the full string.";
+"modelRouting.keySheet.testFailedStatus" = "Unexpected response (HTTP %d): %@";
+"modelRouting.keySheet.testFailedNetwork" = "Network error: %@";
+
+/* Common */
+"common.cancel" = "Cancel";

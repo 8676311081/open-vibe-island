@@ -257,11 +257,38 @@ struct UpstreamProfileStoreTests {
                 outputUSDPerMtok: 2.0,
                 cacheReadUSDPerMtok: 0.1,
                 contextWindowTokens: 100_000,
-                discountExpiresAt: Date(timeIntervalSince1970: 1_800_000_000)
+                discountExpiresAt: Date(timeIntervalSince1970: 1_800_000_000),
+                listInputUSDPerMtok: 4.0,
+                listOutputUSDPerMtok: 8.0
             )
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(UpstreamProfile.self, from: data)
         #expect(decoded == original)
+    }
+
+    @Test
+    func legacyJSONWithoutListPriceFieldsDecodesWithZeroFallback() throws {
+        // Pre-4.3 profiles serialized to UserDefaults won't have the
+        // list* fields. The custom Codable init must accept that
+        // shape and default both to 0 — otherwise an Open Island
+        // upgrade breaks any user's existing custom profile.
+        let legacyJSON = """
+        {
+          "id": "legacy",
+          "displayName": "k",
+          "baseURL": "https://example.com",
+          "isCustom": true,
+          "costMetadata": {
+            "inputUSDPerMtok": 1.5,
+            "outputUSDPerMtok": 3.0,
+            "contextWindowTokens": 100000
+          }
+        }
+        """
+        let decoded = try JSONDecoder().decode(UpstreamProfile.self, from: Data(legacyJSON.utf8))
+        #expect(decoded.id == "legacy")
+        #expect(decoded.costMetadata?.listInputUSDPerMtok == 0)
+        #expect(decoded.costMetadata?.listOutputUSDPerMtok == 0)
     }
 }

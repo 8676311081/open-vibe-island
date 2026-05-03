@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case watch
     case autoResponse
     case llmSpend
+    case modelRouting
     case shortcuts
     case lab
     case about
@@ -29,6 +30,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .watch:        "Watch"
         case .autoResponse: lang.t("settings.tab.autoResponse")
         case .llmSpend:     lang.t("settings.tab.llmSpend")
+        case .modelRouting: lang.t("settings.modelRouting")
         case .shortcuts:    lang.t("settings.tab.shortcuts")
         case .lab:          lang.t("settings.tab.lab")
         case .about:        lang.t("settings.tab.about")
@@ -45,6 +47,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .watch:        "applewatch"
         case .autoResponse: "bolt.fill"
         case .llmSpend:     "dollarsign.circle.fill"
+        case .modelRouting: "arrow.triangle.swap"
         case .shortcuts:    "keyboard.fill"
         case .lab:          "flask.fill"
         case .about:        "info.circle.fill"
@@ -61,6 +64,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .watch:        .cyan
         case .autoResponse: .yellow
         case .llmSpend:     .green
+        case .modelRouting: .indigo
         case .shortcuts:    .gray
         case .lab:          .pink
         case .about:        .blue
@@ -69,9 +73,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var section: SettingsSection {
         switch self {
-        case .general, .setup, .display, .sound, .appearance, .watch, .autoResponse, .llmSpend: .system
-        case .shortcuts, .lab:                                                                  .advanced
-        case .about:                                                                            .app
+        case .general, .setup, .display, .sound, .appearance, .watch, .autoResponse, .llmSpend, .modelRouting: .system
+        case .shortcuts, .lab:                                                                                 .advanced
+        case .about:                                                                                           .app
         }
     }
 }
@@ -169,6 +173,8 @@ struct SettingsView: View {
                 AutoResponseSettingsPane(model: model)
             case .llmSpend:
                 LLMSpendSettingsPane(model: model)
+            case .modelRouting:
+                ModelRoutingPane(model: model)
             case .shortcuts:
                 PlaceholderSettingsPane(model: model, titleKey: "settings.tab.shortcuts", subtitleKey: "settings.shortcuts.comingSoon")
             case .lab:
