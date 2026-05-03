@@ -24,6 +24,10 @@ final class LLMProxyCoordinator {
     /// underlying Keychain handle survives `rebuildServer()` and
     /// stays consistent across upstream URL changes.
     let credentialsStore: RouterCredentialsStore
+    /// Routing-table resolver, paired with `credentialsStore`. Single
+    /// owner per coordinator so active-profile state and custom-
+    /// profile mutations don't get reset on `rebuildServer()`.
+    let profileStore: UpstreamProfileStore
     private(set) var isRunning = false
 
     var port: UInt16 { server.configuration.port }
@@ -32,10 +36,13 @@ final class LLMProxyCoordinator {
 
     init() {
         let credentials = RouterCredentialsStore.live()
+        let profiles = UpstreamProfileStore()
         self.credentialsStore = credentials
+        self.profileStore = profiles
         self.server = LLMProxyServer(
             configuration: Self.makeConfiguration(),
-            credentialsStore: credentials
+            credentialsStore: credentials,
+            profileResolver: profiles
         )
         let store = LLMStatsStore()
         self.statsStore = store
@@ -126,7 +133,8 @@ final class LLMProxyCoordinator {
         if wasRunning { stop() }
         self.server = LLMProxyServer(
             configuration: Self.makeConfiguration(),
-            credentialsStore: credentialsStore
+            credentialsStore: credentialsStore,
+            profileResolver: profileStore
         )
         if wasRunning { start() }
     }

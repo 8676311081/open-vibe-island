@@ -311,3 +311,8 @@
 "settings.llmSpend.compression.confirmSheetCancel" = "取消";
 "settings.llmSpend.compression.statsAllTime" = "累计：%@ 次命令，平均节省约 %@%%";
 "common.close" = "关闭";
+
+/* 模型路由面板 (4.3 commit 使用；4.2 占位以稳定 key)。 */
+"modelRouting.profile.anthropic.native" = "Anthropic 原生";
+"modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
+"modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";

@@ -86,27 +86,29 @@ public enum LLMRequestRewriter {
     ///   token
     /// - Upstream URL has no host (degenerate / file URL)
     ///
-    /// **4.1 placeholder:** the provider table is hardcoded to
-    /// `api.deepseek.com → "deepseek"`. 4.2 replaces this branch
-    /// with a `UpstreamProfile` lookup so adding a new backend
-    /// becomes config rather than code.
+    /// Provider matching is delegated to `profileResolver` —
+    /// `UpstreamProfileStore` ships built-in profiles for Anthropic
+    /// Native + DeepSeek V4 Pro/Flash and lets users add Custom
+    /// profiles. The rewriter does NOT know about specific hosts;
+    /// it only asks "does this URL map to a profile that wants a
+    /// stored credential?".
     public static func rewriteAuthorizationIfNeeded(
         _ headers: inout [(name: String, value: String)],
         upstreamURL: URL,
+        profileResolver: any UpstreamProfileResolver,
         credentialsStore: RouterCredentialsStore
     ) {
-        guard let host = upstreamURL.host?.lowercased() else { return }
-        let account: String?
-        switch host {
-        case "api.deepseek.com":
-            account = "deepseek"
-        default:
-            account = nil
+        guard let profile = profileResolver.profileMatching(url: upstreamURL),
+              let account = profile.keychainAccount
+        else {
+            // No matching profile, OR a matching profile that wants
+            // pass-through (Anthropic Native uses claude CLI's own
+            // key — `keychainAccount = nil`).
+            return
         }
-        guard let account else { return }
         // `try?` flattens `throws -> String?` to `String?` (SE-0230),
         // so a thrown Keychain error and a missing-key both surface
-        // as nil here. Both should fail-open: surface as a request
+        // as nil here. Both should fail-open: surfacing as a request
         // failure would be worse UX than letting upstream 401 expose
         // the misconfiguration.
         guard let key = try? credentialsStore.credential(for: account), !key.isEmpty else {

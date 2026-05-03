@@ -311,3 +311,9 @@
 "settings.llmSpend.compression.confirmSheetCancel" = "Cancel";
 "settings.llmSpend.compression.statsAllTime" = "All time: %@ commands, ~%@%% saved on average";
 "common.close" = "Close";
+
+/* Model routing pane (4.3 commit consumes these; placeholders filed
+   in 4.2 so the keys are stable). */
+"modelRouting.profile.anthropic.native" = "Anthropic Native";
+"modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
+"modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";

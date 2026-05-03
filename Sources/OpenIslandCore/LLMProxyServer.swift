@@ -103,14 +103,21 @@ public final class LLMProxyServer: @unchecked Sendable {
     /// because they target `api.anthropic.com` (or a stubbed protocol
     /// class) and don't need provider key lookup.
     private let credentialsStore: RouterCredentialsStore?
+    /// Routing-table resolver. Pairs with `credentialsStore`; both
+    /// must be set for the Authorization rewrite to fire (a missing
+    /// resolver means we have no way to decide which profile applies,
+    /// and a missing store means we have no way to read the key).
+    private let profileResolver: (any UpstreamProfileResolver)?
 
     public init(
         configuration: LLMProxyConfiguration = .default,
         additionalProtocolClasses: [AnyClass] = [],
-        credentialsStore: RouterCredentialsStore? = nil
+        credentialsStore: RouterCredentialsStore? = nil,
+        profileResolver: (any UpstreamProfileResolver)? = nil
     ) {
         self.configuration = configuration
         self.credentialsStore = credentialsStore
+        self.profileResolver = profileResolver
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         cfg.timeoutIntervalForRequest = 600     // SSE streams can idle a while
@@ -435,10 +442,11 @@ public final class LLMProxyServer: @unchecked Sendable {
         // `credentialsStore` is nil (no provider routing wired) it's
         // a no-op.
         var forwardHeaders = context.requestHeaders
-        if let store = credentialsStore {
+        if let store = credentialsStore, let resolver = profileResolver {
             LLMRequestRewriter.rewriteAuthorizationIfNeeded(
                 &forwardHeaders,
                 upstreamURL: url,
+                profileResolver: resolver,
                 credentialsStore: store
             )
         }

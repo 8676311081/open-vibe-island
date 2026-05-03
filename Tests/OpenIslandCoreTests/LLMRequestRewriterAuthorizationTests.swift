@@ -36,6 +36,16 @@ private func makeStore(_ storedKeys: [String: String] = [:]) -> RouterCredential
     return RouterCredentialsStore(backend: backend)
 }
 
+/// Resolver wired to the built-in profile set with isolated
+/// UserDefaults so tests don't interfere with each other or with
+/// real app state. Sufficient for header-rewriter tests: the
+/// rewriter doesn't care which profile resolves, only whether the
+/// matched profile has a `keychainAccount` set.
+private func makeBuiltinResolver() -> any UpstreamProfileResolver {
+    let suite = "rewriter-test-\(UUID().uuidString)"
+    return UpstreamProfileStore(userDefaults: UserDefaults(suiteName: suite)!)
+}
+
 /// Suite name disambiguated from `LLMRequestRewriterTests` (which
 /// already lives in `LLMUsageHeuristicsTests.swift` and covers the
 /// body-rewrite path for OpenAI streaming). Header-rewrite is a
@@ -57,6 +67,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.anthropic.com/v1/messages")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         let auth = headers.first(where: { $0.name.lowercased() == "authorization" })?.value
@@ -75,6 +86,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.deepseek.com/anthropic/v1/messages")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         let auth = headers.first(where: { $0.name.lowercased() == "authorization" })?.value
@@ -94,6 +106,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.deepseek.com/anthropic/v1/messages")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         #expect(headers.first?.value == "Bearer sk-ant-USER")
@@ -113,6 +126,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.deepseek.com/anthropic")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         let authHeaders = headers.filter { $0.name.lowercased() == "authorization" }
@@ -134,6 +148,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.deepseek.com/anthropic")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         let auth = headers.first(where: { $0.name.lowercased() == "authorization" })?.value
@@ -153,6 +168,7 @@ struct LLMRequestRewriterAuthorizationTests {
         LLMRequestRewriter.rewriteAuthorizationIfNeeded(
             &headers,
             upstreamURL: URL(string: "https://api.deepseek.com/anthropic")!,
+            profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
         #expect(headers.first?.value == "Bearer original")
