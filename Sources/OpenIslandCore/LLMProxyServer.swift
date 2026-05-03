@@ -385,7 +385,7 @@ public final class LLMProxyServer: @unchecked Sendable {
         )
         let upstreamBase: URL
         switch upstream {
-        case .anthropic: upstreamBase = configuration.anthropicUpstream
+        case .anthropic: upstreamBase = resolvedAnthropicUpstream()
         case .openai: upstreamBase = configuration.openAIUpstream
         case .unknown:
             respondLocally(
@@ -423,6 +423,43 @@ public final class LLMProxyServer: @unchecked Sendable {
         }
 
         forward(context: context, upstreamBase: upstreamBase, state: state)
+    }
+
+    // MARK: - Active-profile routing
+
+    /// Resolve the upstream URL for an Anthropic-format request,
+    /// preferring the user's selected `UpstreamProfile.baseURL` over
+    /// the static `configuration.anthropicUpstream` field.
+    ///
+    /// The static `configuration.anthropicUpstream` predates the
+    /// profile system. We keep its semantics narrow now: it ONLY
+    /// applies when the active profile is the built-in
+    /// `anthropic-native` AND the value has been explicitly
+    /// overridden away from the built-in default
+    /// (`https://api.anthropic.com`). That preserves the self-hosted-
+    /// gateway escape hatch (LLMSpend settings → "Anthropic upstream
+    /// URL") for users pointing at an Anthropic-compatible proxy
+    /// without registering it as a custom profile. For every other
+    /// active profile (DeepSeek V4 Pro/Flash, custom), the profile's
+    /// own `baseURL` wins — the override field is bypassed entirely.
+    ///
+    /// When `profileResolver` is `nil` (legacy callers / test helpers
+    /// that don't wire routing), the behavior collapses to the pre-
+    /// 4.6 path: always return `configuration.anthropicUpstream`. So
+    /// existing tests don't need to thread a resolver through.
+    private func resolvedAnthropicUpstream() -> URL {
+        guard let resolver = profileResolver else {
+            return configuration.anthropicUpstream
+        }
+        let active = resolver.currentActiveProfile()
+        if active.id == BuiltinProfiles.anthropicNative.id {
+            let configured = configuration.anthropicUpstream
+            let defaultUpstream = BuiltinProfiles.anthropicNative.baseURL
+            if configured != defaultUpstream {
+                return configured
+            }
+        }
+        return active.baseURL
     }
 
     // MARK: - Forwarding
