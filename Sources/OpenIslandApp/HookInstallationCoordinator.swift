@@ -447,6 +447,44 @@ final class HookInstallationCoordinator {
         }
     }
 
+    /// Copy `claude-native` and `oi-claude` shims from the app bundle
+    /// to `~/.open-island/bin/`. Idempotent — only overwrites when
+    /// the bundle version differs. Call once at startup.
+    func ensureShimsInstalled() {
+        let fileManager = FileManager.default
+        let targetDir = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".open-island", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+
+        guard let shimURLs = Bundle.appResources.urls(
+            forResourcesWithExtension: nil,
+            subdirectory: "bin"
+        ), !shimURLs.isEmpty else { return }
+
+        try? fileManager.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        for sourceURL in shimURLs {
+            let name = sourceURL.lastPathComponent
+            let targetURL = targetDir.appendingPathComponent(name)
+
+            do {
+                if fileManager.fileExists(atPath: targetURL.path) {
+                    let sourceData = try Data(contentsOf: sourceURL)
+                    let targetData = try Data(contentsOf: targetURL)
+                    if sourceData == targetData { continue }
+                    try fileManager.removeItem(at: targetURL)
+                }
+                try fileManager.copyItem(at: sourceURL, to: targetURL)
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o755],
+                    ofItemAtPath: targetURL.path
+                )
+            } catch {
+                onStatusMessage?("Failed to install shim \(name): \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Health check & auto-repair
 
     var claudeHealthReport: HookHealthReport?

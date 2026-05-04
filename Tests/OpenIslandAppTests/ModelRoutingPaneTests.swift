@@ -12,16 +12,28 @@ struct ModelRoutingPaneTests {
     // MARK: - cardState
 
     @Test
-    func activeProfileBadgeShownForActiveCard() {
-        // Anthropic Native is the active profile; cardState must
-        // return .activeAndConfigured. UI branches on this to render
-        // the "Active" badge + highlighted border.
+    func anthropicNativePassthroughIsBlockedForMaxOAuth() {
+        // keychainAccount == nil + baseURL == api.anthropic.com → blocked.
+        // Max/Pro OAuth can't pass through the proxy because Anthropic
+        // enforces client identity end-to-end.
         let state = ModelRoutingDerivation.cardState(
             profile: BuiltinProfiles.anthropicNative,
             activeProfileId: "anthropic-native",
-            hasCredentialFor: { _ in false } // shouldn't be consulted
+            hasCredentialFor: { _ in false }
         )
-        #expect(state == .activeAndConfigured)
+        #expect(state == .blockedBySubscription)
+    }
+
+    @Test
+    func anthropicNativeBlockedEvenWhenInactive() {
+        // Same profile, different active — blocked state is returned
+        // regardless of active/inactive status.
+        let state = ModelRoutingDerivation.cardState(
+            profile: BuiltinProfiles.anthropicNative,
+            activeProfileId: "deepseek-v4-pro",
+            hasCredentialFor: { _ in false }
+        )
+        #expect(state == .blockedBySubscription)
     }
 
     @Test
@@ -34,19 +46,6 @@ struct ModelRoutingPaneTests {
             hasCredentialFor: { _ in false }
         )
         #expect(state == .inactiveAndMissingKey)
-    }
-
-    @Test
-    func notNeededKeyDoesNotShowConfigureCTA() {
-        // Anthropic Native has keychainAccount = nil. Even if
-        // hasCredentialFor returns false for everything, the card
-        // must NOT route to the Configure path — it's a passthrough.
-        let state = ModelRoutingDerivation.cardState(
-            profile: BuiltinProfiles.anthropicNative,
-            activeProfileId: "deepseek-v4-pro", // not active
-            hasCredentialFor: { _ in false }
-        )
-        #expect(state == .inactiveAndConfigured)
     }
 
     @Test

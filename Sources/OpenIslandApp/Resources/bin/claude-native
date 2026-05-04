@@ -1,0 +1,8 @@
+#!/bin/zsh
+# Claude Max/Pro subscription — native direct connect, bypasses Open Island.
+# Usage: claude-native [args...]
+#
+# Strips ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN so Claude CLI talks
+# directly to api.anthropic.com with the ambient OAuth credential.
+
+exec env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN claude "$@"

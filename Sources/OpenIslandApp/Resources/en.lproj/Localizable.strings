@@ -319,6 +319,10 @@
 /* Model routing pane (4.3 commit consumes these; placeholders filed
    in 4.2 so the keys are stable). */
 "modelRouting.profile.anthropic.native" = "Anthropic Native";
+"modelRouting.profile.anthropic.native.warning" = "Requires Anthropic Console API key. Max/Pro OAuth subscription is not supported.";
+"modelRouting.profile.anthropic.native.blockedAction" = "Unavailable";
+"modelRouting.profile.anthropic.native.blockedAlert.title" = "Anthropic Max/Pro OAuth Not Supported";
+"modelRouting.profile.anthropic.native.blockedAlert.message" = "Anthropic enforces end-to-end client identity verification on OAuth tokens which cannot pass through a proxy. To connect to Anthropic directly, install the claude-native shim from Setup, or create a custom profile with your Console API key.";
 "modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
 "modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";
 

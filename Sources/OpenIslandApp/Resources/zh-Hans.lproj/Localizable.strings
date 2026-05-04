@@ -318,6 +318,10 @@
 
 /* 模型路由面板 (4.3 commit 使用；4.2 占位以稳定 key)。 */
 "modelRouting.profile.anthropic.native" = "Anthropic 原生";
+"modelRouting.profile.anthropic.native.warning" = "需要 Anthropic Console 的 API key。Max/Pro OAuth 订阅无法通过此代理使用。";
+"modelRouting.profile.anthropic.native.blockedAction" = "不可用";
+"modelRouting.profile.anthropic.native.blockedAlert.title" = "Anthropic Max/Pro OAuth 不支持";
+"modelRouting.profile.anthropic.native.blockedAlert.message" = "Anthropic 会对 OAuth 令牌执行端到端客户端身份验证，无法通过 Open Island 代理。如需直接连接 Anthropic，请在 Setup 中安装 claude-native shim，或使用 Console API key 创建自定义 profile。";
 "modelRouting.profile.deepseek.v4Pro" = "DeepSeek V4 Pro";
 "modelRouting.profile.deepseek.v4Flash" = "DeepSeek V4 Flash";
 

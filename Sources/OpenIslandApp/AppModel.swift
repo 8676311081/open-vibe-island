@@ -1530,6 +1530,10 @@ final class AppModel {
         hooks.hooksBinaryURL = payload.hooksBinaryURL
         hooks.updateHooksBinaryIfNeeded()
 
+        // Install shim scripts (claude-native, oi-claude) to
+        // ~/.open-island/bin/ if not present or outdated.
+        hooks.ensureShimsInstalled()
+
         // Auto-install missing hooks and usage bridge, then run health checks.
         if payload.hooksBinaryURL != nil {
             Task { @MainActor [weak self] in

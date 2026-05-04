@@ -1,0 +1,11 @@
+#!/bin/zsh
+# Claude Code routed through Open Island proxy.
+# Usage: oi-claude [args...]
+#
+# Sets ANTHROPIC_BASE_URL to the local Open Island proxy so all requests
+# go through the model-routing layer (cost tracking, profile switching).
+# Environment:
+#   OPEN_ISLAND_PORT  — proxy port (default 9710)
+
+: "${OPEN_ISLAND_PORT:=9710}"
+exec env ANTHROPIC_BASE_URL="http://127.0.0.1:${OPEN_ISLAND_PORT}" claude "$@"
