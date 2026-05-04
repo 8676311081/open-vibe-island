@@ -123,6 +123,53 @@ Open `Package.swift` in Xcode for the app target. Requires macOS 14+, Swift 6.2.
 - Run targeted checks that match the change (`swift build`, `swift test`, or manual verification).
 - If no automated verification exists yet, state that explicitly in the summary and still commit.
 
+## Model routing (LLM proxy)
+
+Open Island runs a local HTTP proxy on `127.0.0.1:9710` in front of `claude` /
+`codex` CLIs for two purposes: cross-provider request rewriting (so the same
+Claude CLI call can hit Anthropic / DeepSeek / BuerAI / Console-API / custom
+upstreams) and spend tracking. Per-invocation profile override is wired in via
+a URL sentinel — the `claude-3` shim emits
+`/_oi/profile/<id>/v1/messages` and the proxy strips the prefix at request
+entry, then resolves the profile by id.
+
+Three user-facing commands:
+
+| Command | Routes through proxy? | Profile selection |
+|---|---|---|
+| `claude` | No — official binary, unmodified, OAuth direct connect | n/a (Anthropic Max/Pro subscription path) |
+| `claude-3` | Yes | Uses the GUI-active profile from the routing pane |
+| `OI_PROFILE=<id> claude-3` | Yes | Per-call override — `<id>` from the available registry |
+
+Key files (do NOT call `currentActiveProfile()` on the request hot path; the
+proxy resolves it once at entry and threads `ResolvedProfile` through):
+
+- `Sources/OpenIslandCore/LLMProxyServer.swift` — `handleParsedRequest`,
+  `parseSentinel(path:)`, `upstreamForAnthropic(resolved:)`,
+  `isAnthropicPassthroughBlocked(upstreamBase:resolved:)`,
+  `makeUnknownOverrideBody(id:available:)`
+- `Sources/OpenIslandCore/UpstreamProfileStore.swift` — `ResolvedProfile`,
+  `ProfileSelectionSource`, `resolveProfile(overrideId:)`,
+  `profile(id:)`, `availableProfileIds()`
+- `Sources/OpenIslandCore/LLMRequestRewriter.swift` — direct-profile overloads
+  for auth + body model rewrite (`profile:` arg variants are the canonical
+  path; resolver-based ones are compat shims)
+- `Sources/OpenIslandApp/HookInstallationCoordinator.swift` —
+  `bundledShimNames` + `ensureShimsInstalled` (flat-bundle lookup; SPM
+  `.process("Resources")` flattens the source `Resources/bin/` subtree)
+- `Sources/OpenIslandApp/Resources/bin/{claude-native,oi-claude,claude-3}` —
+  the three shims; `oi-claude` is a deprecation-period alias for `claude-3`
+- `docs/features/profile-override/architecture.md` — full design rationale
+- `docs/features/profile-override/migration.md` — user dotfile cleanup guide
+  (legacy `~/.zshrc claude()` hijack → `claude-3`)
+
+Per-request invariant: profile resolution happens **once** in
+`handleParsedRequest` (`profileResolver?.resolveProfile(overrideId:)`) and
+flows through `LLMProxyRequestContext.resolvedProfileId` to observers and
+pricing. A mid-request GUI active flip cannot tear an in-flight request.
+Unknown override ids return **400** with an `available` list — never silent
+fallback to active.
+
 ## Important files
 
 - `Sources/OpenIslandApp/AppModel.swift` — Central app state, session management, bridge lifecycle

@@ -107,12 +107,35 @@ public enum LLMRequestRewriter {
         profileResolver: any UpstreamProfileResolver,
         credentialsStore: RouterCredentialsStore
     ) {
-        guard let profile = profileResolver.profileMatching(url: upstreamURL),
-              let account = profile.keychainAccount
-        else {
-            // No matching profile, OR a matching profile that wants
-            // pass-through (Anthropic Native uses claude CLI's own
-            // key — `keychainAccount = nil`).
+        guard let profile = profileResolver.profileMatching(url: upstreamURL) else {
+            return
+        }
+        rewriteAuthorizationIfNeeded(
+            &headers,
+            profile: profile,
+            credentialsStore: credentialsStore
+        )
+    }
+
+    /// Direct-profile variant. Used by the proxy hot path after T2's
+    /// per-request resolution: the proxy resolves once at request
+    /// entry and passes the resolved `UpstreamProfile` here, so the
+    /// rewriter never re-reads active state and a mid-flight profile
+    /// switch cannot tear the request between resolution and forward.
+    ///
+    /// Behavior is identical to the URL-lookup variant once a profile
+    /// is in hand: profiles with `keychainAccount == nil`
+    /// (Anthropic Native passthrough) no-op; profiles with a stored
+    /// key that resolves to a non-empty value replace any existing
+    /// `Authorization` header.
+    public static func rewriteAuthorizationIfNeeded(
+        _ headers: inout [(name: String, value: String)],
+        profile: UpstreamProfile,
+        credentialsStore: RouterCredentialsStore
+    ) {
+        guard let account = profile.keychainAccount else {
+            // Pass-through profile (Anthropic Native uses claude CLI's
+            // own key).
             return
         }
         // `try?` flattens `throws -> String?` to `String?` (SE-0230),
@@ -177,9 +200,24 @@ public enum LLMRequestRewriter {
         path: String,
         profileResolver: any UpstreamProfileResolver
     ) -> Data {
+        rewriteModelFieldIfNeeded(
+            body,
+            path: path,
+            profile: profileResolver.currentActiveProfile()
+        )
+    }
+
+    /// Direct-profile variant. Same contract as the resolver-based
+    /// overload, but takes the resolved `UpstreamProfile` directly so
+    /// the proxy hot path can resolve once at request entry and pass
+    /// the result through without race risk.
+    public static func rewriteModelFieldIfNeeded(
+        _ body: Data,
+        path: String,
+        profile: UpstreamProfile
+    ) -> Data {
         guard shouldRewriteModelField(path: path) else { return body }
-        let active = profileResolver.currentActiveProfile()
-        guard let override = active.modelOverride, !override.isEmpty else {
+        guard let override = profile.modelOverride, !override.isEmpty else {
             return body
         }
         guard !body.isEmpty,

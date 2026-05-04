@@ -241,6 +241,45 @@ struct UpstreamProfileStoreTests {
         #expect(matched?.id == "deeper")
     }
 
+
+    @Test
+    func profileMatchingPrefersActiveWhenProfilesShareBaseURL() throws {
+        // BuerAI-style setup: Pro and Flash profiles intentionally
+        // share the same gateway URL but differ by modelOverride and
+        // Keychain account. Auth lookup must follow the active
+        // profile, not the first custom row on that host.
+        let (defaults, suite) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UpstreamProfileStore(userDefaults: defaults)
+        let flash = UpstreamProfile(
+            id: "buerai-flash",
+            displayName: "BuerAI Flash",
+            baseURL: URL(string: "https://api.buerai.top")!,
+            keychainAccount: "custom-buerai-flash",
+            modelOverride: "claude-sonnet-4-6",
+            isCustom: true,
+            costMetadata: nil
+        )
+        let pro = UpstreamProfile(
+            id: "buerai-pro",
+            displayName: "BuerAI Pro",
+            baseURL: URL(string: "https://api.buerai.top")!,
+            keychainAccount: "custom-buerai-pro",
+            modelOverride: "claude-opus-4-6",
+            isCustom: true,
+            costMetadata: nil
+        )
+        try store.addCustomProfile(flash)
+        try store.addCustomProfile(pro)
+        try store.setActiveProfile("buerai-pro")
+
+        let matched = store.profileMatching(
+            url: URL(string: "https://api.buerai.top/v1/messages")!
+        )
+        #expect(matched?.id == "buerai-pro")
+        #expect(matched?.keychainAccount == "custom-buerai-pro")
+    }
+
     // MARK: - Codable round-trip
 
     @Test

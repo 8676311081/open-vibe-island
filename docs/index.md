@@ -19,6 +19,12 @@ This index is the repository map for humans and coding agents. Read these files 
 
 - [docs/hooks.md](./hooks.md) for the supported hook events, payload fields, and directive response protocol
 
+## Features
+
+- [docs/features/profile-override/architecture.md](./features/profile-override/architecture.md) for the per-invocation profile override design (URL sentinel, ResolvedProfile, command surface)
+- [docs/features/profile-override/migration.md](./features/profile-override/migration.md) for the user-facing migration from the legacy `~/.zshrc claude()` shell function to the new `claude-3` shim
+- [docs/features/profile-override/progress.md](./features/profile-override/progress.md) for the cross-session implementation log (T1–T9)
+
 ## Harness And Planning
 
 - [docs/exec-plans/README.md](./exec-plans/README.md) for the active and completed execution-plan convention
@@ -51,3 +57,4 @@ This index is the repository map for humans and coding agents. Read these files 
 - [docs/island-position-investigation.md](./island-position-investigation.md) for notch and external-display placement work
 - [docs/notchi-integration.md](./notchi-integration.md) for integration notes related to Notchi
 - [docs/installed-app-bundle-analysis.md](./installed-app-bundle-analysis.md) for installed-app bundle observations
+- [docs/usage-freshness-investigation.md](./usage-freshness-investigation.md) for the closed investigation into Claude usage freshness via the Claude.ai web API

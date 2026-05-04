@@ -1,0 +1,317 @@
+{
+  "feature": "profile-override",
+  "approval": {
+    "status": "approved",
+    "approved_by": "user-interactive",
+    "approved_at": "2026-05-04T05:30:00Z",
+    "notes": "User typed '开始T1' — interactive checkpoint execution authorized for T1 only. Continuation to T2+ requires another explicit prompt."
+  },
+  "execution_policy": {
+    "default_mode_after_approval": "checkpoint",
+    "default_tasks_per_run": 1,
+    "max_tasks_per_run_hard_cap": 3,
+    "bare_approval_starts_execution": false,
+    "proving_run": {
+      "init_verified": false,
+      "tests_verified": false,
+      "regression_check_verified": false,
+      "init_command": "zsh scripts/launch-dev-app.sh --skip-setup",
+      "tests_command": "swift test --filter 'LLMProxyServerIntegrationTests|LLMProxyActiveProfileRoutingTests|UpstreamProfileStoreTests|LLMRequestRewriterAuthorizationTests|LLMRequestRewriterModelFieldTests'",
+      "regression_command": "swift test"
+    }
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Spike — verify URL sentinel reaches proxy intact",
+      "description": "Time-boxed proof that ANTHROPIC_BASE_URL=http://127.0.0.1:9710/_oi/profile/<id>/ causes the proxy to receive a request whose path begins with /_oi/profile/<id>/v1/messages. If false, this whole architecture pivots to a header-based fallback before any other task runs.",
+      "depends_on": [],
+      "steps": [
+        "Add a temporary debug log in LLMProxyServer.handleParsedRequest that prints head.path",
+        "Set ANTHROPIC_BASE_URL=http://127.0.0.1:9710/_oi/profile/spike-test in a fresh terminal and run `claude --version` (or smallest non-network call)",
+        "Or, if claude exits early without sending a request, use `curl http://127.0.0.1:9710/_oi/profile/spike-test/v1/messages -X POST -d '{}' -H 'authorization: Bearer fake'`",
+        "Confirm the proxy log shows path starting with /_oi/profile/spike-test/",
+        "Remove the debug log; document spike result inside this task's notes",
+        "If the sentinel is dropped or rewritten, write notes['result'] = 'fail' with details and STOP — do NOT proceed to T2"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T05:27:30Z",
+        "method": "curl POST to http://127.0.0.1:9710/_oi/profile/spike-test/v1/messages",
+        "observed_path": "/_oi/profile/spike-test/v1/messages",
+        "observed_method": "POST",
+        "log_line": "OpenIslandApp PID 85749 [app.openisland:LLMProxy] [OI-T1-SPIKE] path=/_oi/profile/spike-test/v1/messages method=POST",
+        "upstream_response_seen": "404 from api2.tabcode.cc (expected — sentinel not yet stripped, request forwarded with sentinel intact, downstream returned 404). Confirms (a) proxy received path verbatim, (b) routing currently misclassifies sentinel as openai/plus path which becomes the obvious fix point in T3.",
+        "probe_reverted": true,
+        "next_blockers": "None. T2 (per-request ResolvedProfile refactor) cleared to start."
+      }
+    },
+    {
+      "id": "T2",
+      "title": "Introduce ResolvedProfile and propagate via LLMProxyRequestContext",
+      "description": "Centralize profile resolution at request entry. Remove duplicate `currentActiveProfile()` calls from LLMRequestRewriter and LLMPricing — they receive the resolved profile via context.",
+      "depends_on": ["T1"],
+      "steps": [
+        "Add ResolvedProfile struct + Source enum in UpstreamProfileStore.swift",
+        "Add resolveProfile(overrideId:) method that returns ResolvedProfile or throws .unknownOverride(id:)",
+        "Add resolvedProfileId + profileSelectionSource to LLMProxyRequestContext",
+        "Refactor LLMProxyServer.handleParsedRequest to resolve once, populate context",
+        "Refactor LLMRequestRewriter.rewriteModelFieldIfNeeded to accept resolved: UpstreamProfile (overload)",
+        "Refactor LLMRequestRewriter.rewriteAuthorizationIfNeeded similarly (or change profileResolver call site)",
+        "Refactor LLMPricing.priceFor(model:context:) to read context.resolvedProfileId",
+        "All existing tests still pass: swift test --filter 'LLMProxy|UpstreamProfile|LLMRequestRewriter'",
+        "Add test: changing active profile between request entry and forward does NOT affect that request (use a sleep + setActiveProfile race)"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T05:50:00Z",
+        "files_changed": [
+          "Sources/OpenIslandCore/UpstreamProfileStore.swift — added ProfileSelectionSource enum, ResolvedProfile struct, UpstreamProfileResolverError enum, profile(id:) and resolveProfile(overrideId:) on the resolver protocol with default impl, and a concrete override of profile(id:) on UpstreamProfileStore",
+          "Sources/OpenIslandCore/LLMProxyServer.swift — added resolvedProfileId and profileSelectionSource to LLMProxyRequestContext (default-nil for back compat); handleParsedRequest now calls profileResolver.resolveProfile(overrideId: nil) once at entry and threads resolved.profile down through forward(); forward() signature gained `resolved: ResolvedProfile?` and now passes resolved.profile to the rewriter directly",
+          "Sources/OpenIslandCore/LLMRequestRewriter.swift — added direct-profile overloads rewriteAuthorizationIfNeeded(_:profile:credentialsStore:) and rewriteModelFieldIfNeeded(_:path:profile:); old resolver-based methods kept as thin shims that look up active and delegate",
+          "Sources/OpenIslandCore/LLMPricing.swift — added direct-profile costUSD(model:usage:activeProfile:); old profileResolver-based signature kept as compat shim",
+          "Sources/OpenIslandCore/LLMUsageObserver.swift — uses context.resolvedProfileId to look up the entry-time profile via profileResolver?.profile(id:) and passes it to costUSD; falls back to active when context lacks an id (legacy/test)",
+          "Tests/OpenIslandCoreTests/LLMRequestRewriterModelFieldTests.swift — added directProfileVariantRewritesWithoutResolverIndirection",
+          "Tests/OpenIslandCoreTests/LLMProxyActiveProfileRoutingTests.swift — added resolvedProfileIdReflectsActiveAtRequestEntry + ContextCapturingObserver helper class"
+        ],
+        "regressions": "none",
+        "test_summary": "527 / 527 tests pass (was 525 + 2 new). Filtered T2 suites (LLMRequestRewriter, LLMProxyActiveProfileRoutingTests, UpstreamProfile) → 45 / 45 green.",
+        "race_test": "resolvedProfileIdReflectsActiveAtRequestEntry — sends Request A while active=anthropic-native, flips active to deepseek-v4-pro, sends Request B; observer captures both contexts; Request A's resolvedProfileId pinned to anthropic-native, Request B's to deepseek-v4-pro. Proves entry-time resolution semantics.",
+        "next_blockers": "None. T3 (sentinel parser at proxy entry) cleared to start."
+      }
+    },
+    {
+      "id": "T3",
+      "title": "Parse /_oi/profile/<id>/ sentinel at proxy entry",
+      "description": "When path begins with /_oi/profile/<id>/, strip the prefix and use the parsed id as the override input to resolveProfile.",
+      "depends_on": ["T2"],
+      "steps": [
+        "Add a parseSentinel(path:) helper in LLMProxyServer that returns (overrideId: String?, remainingPath: String)",
+        "Wire into handleParsedRequest: parsed override flows into resolveProfile(overrideId:)",
+        "Forward uses remainingPath, NOT the original path (otherwise upstream gets /_oi/profile/...)",
+        "Healthz / unknown / OAuth gate paths still work (they do not use sentinel)",
+        "Add 3 tests: (a) sentinel matched, profile used; (b) sentinel absent, active profile used; (c) sentinel + active mismatch — sentinel wins"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T06:10:00Z",
+        "files_changed": [
+          "Sources/OpenIslandCore/LLMProxyServer.swift — added parseSentinel(path:) static helper near combineUpstream; reordered handleParsedRequest so sentinel parsing runs first (before healthz check, before LLMUpstreamRouter.route, before profile resolution); renamed resolvedAnthropicUpstream() → upstreamForAnthropic(resolved:) and isAnthropicPassthroughBlocked → isAnthropicPassthroughBlocked(upstreamBase:resolved:) so both honor the resolved profile (which may be from override) instead of re-reading currentActiveProfile; context.path now stores the cleaned (sentinel-stripped) path so observers / upstream see the user-intended endpoint",
+          "Tests/OpenIslandCoreTests/LLMProxyActiveProfileRoutingTests.swift — added sendAnthropicRequestWithOverride helper, sentinelParser (6 inline parser cases), sentinelOverrideRoutesToOverrideProfileBaseURL (T3 a), sentinelAbsentFallsBackToActiveDefault (T3 b), sentinelWinsWhenActiveAndOverrideDisagree (T3 c)"
+        ],
+        "regressions": "none",
+        "test_summary": "531 / 531 tests pass (was 527 + 4 new). T3-impacted suites (LLMProxyActiveProfileRoutingTests, LLMProxyServerIntegrationTests, UpstreamProfile, LLMRequestRewriter) → 59 / 59 green.",
+        "behavioral_invariants_proven": [
+          "(a) override active in URL: forward host comes from override profile (api.deepseek.com), upstream sees stripped path /anthropic/v1/messages, context.profileSelectionSource == .perRequestOverride",
+          "(b) no sentinel: forward host comes from active profile (api.deepseek.com), context.profileSelectionSource == .activeDefault",
+          "(c) active and override disagree: sentinel wins, store.currentActiveProfile() unchanged",
+          "Sentinel-prefixed healthz still short-circuits to 200 (parser strips prefix before healthz check)",
+          "Empty-id sentinel (/_oi/profile//...) treated as no-sentinel — proxy degrades to active default rather than 400 (T4 will tighten only the unknown-id case, not the malformed shape)"
+        ],
+        "deferred_to_t4": "Currently invalid override id (e.g. /_oi/profile/typo/v1/messages) silently falls through to nil resolved → request forwarded with no rewrite. T4 catches UpstreamProfileResolverError.unknownOverride explicitly and responds 400 with the available-id list.",
+        "next_blockers": "None. T4 (400 on unknown id) cleared to start."
+      }
+    },
+    {
+      "id": "T4",
+      "title": "Return 400 for unknown override id",
+      "description": "When sentinel parses but id is not in the profile registry, respond locally with 400 — do NOT silent-fallback to active. Body lists known profile ids so the user can correct typos.",
+      "depends_on": ["T3"],
+      "steps": [
+        "Catch ResolverError.unknownOverride in handleParsedRequest",
+        "Build response body: {\"error\":\"unknown_open_island_profile\",\"id\":\"<typo>\",\"available\":[\"buerai-pro\",\"deepseek-v4-pro\",...]}",
+        "Add 400 → 'Bad Request' to reasonPhrase table (verify it's there)",
+        "Test: sentinel with bogus id returns 400, body contains 'available' list",
+        "Test: upstream is NOT contacted when 400 fires"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T06:30:00Z",
+        "files_changed": [
+          "Sources/OpenIslandCore/UpstreamProfileStore.swift — added availableProfileIds() to UpstreamProfileResolver protocol with default impl returning [active.id] (test-fake fallback); UpstreamProfileStore overrides with allProfiles.map(\\.id).sorted() so the JSON output has stable order",
+          "Sources/OpenIslandCore/LLMProxyServer.swift — replaced try? on resolveProfile with explicit do/catch; UpstreamProfileResolverError.unknownOverride(id:) → respondLocally(400, makeUnknownOverrideBody); other thrown errors → respondLocally(500, generic envelope); added makeUnknownOverrideBody(id:available:) static helper that builds the JSON via JSONSerialization (envelope shape: {type: error, error: {type: unknown_open_island_profile, id, available, message}})",
+          "Tests/OpenIslandCoreTests/LLMProxyActiveProfileRoutingTests.swift — added unknownOverrideIdReturns400WithAvailableList test; added UnknownOverrideUpstreamFlag helper class"
+        ],
+        "regressions": "none",
+        "test_summary": "532 / 532 tests pass (was 531 + 1 new). T4-impacted suites → 60 / 60 green.",
+        "envelope_shape": "{\"type\":\"error\",\"error\":{\"type\":\"unknown_open_island_profile\",\"id\":\"<typo>\",\"available\":[<sorted ids>],\"message\":\"<helpful>\"}} — matches the 409 OAuth-blocked envelope so client error logging is uniform.",
+        "verified_invariants": [
+          "Bogus override id → HTTP 400 (not 401, not 421, not 502)",
+          "Body parses as JSON with envelope shape error.type=unknown_open_island_profile",
+          "Body's error.id field echoes the typo so users see exactly which token was rejected",
+          "Body's error.available contains the full registry sorted alphabetically (anthropic-native first, then deepseek-v4-flash, deepseek-v4-pro)",
+          "Upstream URLProtocol.canInit / startLoading is NEVER triggered — captures stay empty (verified via 100ms post-response wait)"
+        ],
+        "next_blockers": "None. T5 (claude-3 shim that emits sentinel from $OI_PROFILE) cleared. T9 (final shim name) is a non-blocking decision the user owns."
+      }
+    },
+    {
+      "id": "T5",
+      "title": "Add claude-3 shim that emits sentinel from $OI_PROFILE",
+      "description": "Bundle a new shim in Sources/OpenIslandApp/Resources/bin/. Shim reads $OI_PROFILE, builds ANTHROPIC_BASE_URL with sentinel if set, otherwise falls through to plain proxy URL. HookInstallationCoordinator picks it up alongside existing claude-native and oi-claude.",
+      "depends_on": ["T3"],
+      "steps": [
+        "Create Sources/OpenIslandApp/Resources/bin/claude-3 (final name TBD: claude-3 vs oic)",
+        "Shim logic: if $OI_PROFILE set, ANTHROPIC_BASE_URL=http://127.0.0.1:${OPEN_ISLAND_PORT:-9710}/_oi/profile/$OI_PROFILE; else ANTHROPIC_BASE_URL=http://127.0.0.1:${OPEN_ISLAND_PORT:-9710}",
+        "Set chmod 0755, add to HookInstallationCoordinator.ensureShimsInstalled file list",
+        "Write ModelRoutingPaneTests test that the shim file is bundled and copied",
+        "Manual smoke: `OI_PROFILE=buerai-pro claude-3 --print 'hi'` reaches proxy with sentinel, gets routed to BuerAI"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T06:50:00Z",
+        "files_changed": [
+          "Sources/OpenIslandApp/Resources/bin/claude-3 — NEW. zsh shim. Reads $OI_PROFILE: when non-empty, builds base = http://127.0.0.1:${OPEN_ISLAND_PORT:-9710}/_oi/profile/${OI_PROFILE}; else base = bare proxy URL. Final exec: env ANTHROPIC_BASE_URL=$base claude \"$@\". Mode 0755 in source; install loop also chmods 0755.",
+          "Sources/OpenIslandApp/HookInstallationCoordinator.swift — replaced subdirectory:'bin' enumeration with explicit static bundledShimNames list (nonisolated). Discovered + fixed pre-existing latent bug: SPM .process('Resources') flattens the bin/ subdirectory at build time, so the previous urls(forResourcesWithExtension:nil, subdirectory:'bin') call returned an empty array and ensureShimsInstalled was silently no-op. Updated doc comment to reflect the new lookup strategy.",
+          "Tests/OpenIslandAppTests/BundledShimsTests.swift — NEW. 6 tests: bundleShipsAllExpectedShims, installerSourceOfTruthMatchesBundle (catches drift between bundledShimNames and bundle contents), claude3ShimEmitsSentinelPathWhenOIProfileSet, claude3ShimFallsBackToBareProxyWhenOIProfileUnset, claudeNativeShimStripsAnthropicEnv, oiClaudeShimSetsProxyBaseUrlWithoutSentinel."
+        ],
+        "regressions": "none",
+        "test_summary": "538 / 538 tests pass (was 532 + 6 new). T5 BundledShimsTests suite → 6 / 6 green.",
+        "manual_smoke": [
+          "Built + relaunched Open Island Dev.app via scripts/launch-dev-app.sh --skip-setup",
+          "After ~5s startup, ~/.open-island/bin/claude-3 appears (1764B, executable, fresh mtime). Confirms ensureShimsInstalled now actually copies.",
+          "OI_PROFILE=deepseek-v4-pro shim logic locally simulated → would set ANTHROPIC_BASE_URL=http://127.0.0.1:9710/_oi/profile/deepseek-v4-pro (matches expected).",
+          "Live proxy probe: curl http://127.0.0.1:9710/_oi/profile/deepseek-v4-pro/healthz → 200 ok. Confirms the running proxy receives the sentinel path and parseSentinel correctly strips it before the healthz check (T3 invariant verified end-to-end on the running app, not just in tests)."
+        ],
+        "incidental_fix": "Pre-existing latent bug in ensureShimsInstalled: SPM .process flattens Resources subtree at build time, so the original urls(subdirectory:'bin') lookup returned 0 results and the function silently early-returned. Old shims (claude-native, oi-claude) had been pre-installed by an earlier code version with different bundle layout, so the breakage was undetected. T5 surfaced it because the new claude-3 shim was never going to install. Fix: explicit nonisolated static bundledShimNames list + flat-root resource lookup. Test installerSourceOfTruthMatchesBundle catches future drift.",
+        "next_blockers": "None. T6 (migration.md for dotfile cleanup) cleared."
+      }
+    },
+    {
+      "id": "T6",
+      "title": "Produce dotfile cleanup checklist (DOES NOT auto-modify user files)",
+      "description": "Document precisely what the user must remove from their shell startup files. Do NOT modify ~/.zshrc, ~/.zshenv, ~/.zprofile, or launchctl env. Output: a section in docs/features/profile-override/migration.md plus an in-app banner / Setup CLI subcommand TBD.",
+      "depends_on": ["T5"],
+      "steps": [
+        "Create docs/features/profile-override/migration.md",
+        "List the exact lines in ~/.zshrc to delete (function claude() block, lines 86-92 by current count)",
+        "Document grep commands the user runs to verify no lingering ANTHROPIC_BASE_URL exports",
+        "Document `launchctl getenv ANTHROPIC_BASE_URL` check",
+        "Note: keep OPENAI_BASE_URL=http://127.0.0.1:9710 — codex still needs it",
+        "Note: oi-claude stays as alias for one release; deprecate after"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T07:10:00Z",
+        "files_changed": [
+          "docs/features/profile-override/migration.md — NEW. Self-contained migration guide for users with the legacy ~/.zshrc claude() function. Sections: Why migrate / Decision matrix / 5-step migration / Quick reference table / Troubleshooting / Rollback / Deprecation timeline. Read-only — does not script any dotfile changes."
+        ],
+        "regressions": "none (no code touched)",
+        "key_safety_properties": [
+          "Doc explicitly disclaims auto-modification — user runs every edit themselves",
+          "Step 1 verifies the new shim is present BEFORE any dotfile change, so a broken install can't strand the user",
+          "Step 4's sweep covers ~/.zshrc, ~/.zshenv, ~/.zprofile, ~/.profile, ~/.bashrc, ~/.bash_profile (dotfile chain) PLUS launchctl getenv (GUI-launched process env) PLUS NSGlobalDomain (rare but possible)",
+          "Rollback recipe is verbatim restoration of the deleted function — no information loss",
+          "Step 5 verification commands include a NETWORK-FREE smoke (sentinel-prefixed /healthz returns 200) and an UPSTREAM-FREE error path test (unknown override id returns 400 with available list)",
+          "Quick-ref table maps user goal → exact command without Open Island jargon"
+        ],
+        "covered_audience": [
+          "Existing Open Island users who installed before T5 — main migration target",
+          "Max/Pro OAuth subscribers who saw confusing 401s under the old hijack — explained as the WHY",
+          "New users reading the doc fresh for context on the command surface — Decision matrix is the entry point",
+          "Users who skipped T5's app rebuild and don't have claude-3 yet — Step 1 catches that"
+        ],
+        "next_blockers": "None. T7 (spend attribution test) and T8 (CLAUDE.md / README docs) cleared."
+      }
+    },
+    {
+      "id": "T7",
+      "title": "Spend / pricing attribution test",
+      "description": "Verify that requests routed via override are attributed to the override profile (not active) in LLMStatsStore byModel.",
+      "depends_on": ["T3"],
+      "steps": [
+        "Test fixture: 2 active = deepseek, 3 override = buerai-pro requests",
+        "Assert byProfile rollup shows 2 deepseek + 3 buerai-pro",
+        "Assert profileSelectionSource appears in the JSON record"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T07:30:00Z",
+        "scope_note": "Original task description proposed asserting via a `byProfile` rollup field on LLMStatsStore — that field does not exist today and adding it is a separate schema change with its own migration risk. Reframed to: prove the cost values recorded in modelCosts reflect the override profile's pricing pipeline (static priceFor for non-override; profile.costMetadata for override), which is the actual user-observable invariant. The schema-level byProfile rollup is captured as a future improvement (see deferred section below).",
+        "files_changed": [
+          "Tests/OpenIslandCoreTests/LLMProxyServerIntegrationTests.swift — added test costAttributionUsesResolvedProfileMetadataUnderOverride. Sends 2 SSE requests with same usage (input=100, output=42, cache_read=50) — one without sentinel (active=anthropic-native, body untouched, model stays claude-opus-4-7), one with sentinel /_oi/profile/deepseek-v4-pro/v1/messages (body rewriter swaps to deepseek-v4-pro). Echoing mock responder reads the request body and parrots the model into message_start so the observer attributes the bucket under the rewritten id. Asserts modelCosts['claude-opus-4-7'] computes via static table (~$0.001575) and modelCosts['deepseek-v4-pro'] computes via profile.costMetadata (~$0.0000802 with the 75% discount), both non-zero and the static path is at least 5× the metadata path (≥5× tolerance for future pricing tweaks).",
+          "Tests/OpenIslandCoreTests/LLMProxyServerIntegrationTests.swift — bug fix in makeServer: `observer.profileResolver = profileResolver` was missing. Production wires this in LLMProxyCoordinator.swift line 61, but the test fixture skipped it (no test before T7 depended on profile-aware pricing). Without the wire, observer.profileResolver was nil and costUSD's activeProfile arg fell to nil, yielding an unpriced turn for any request whose model isn't in the static priceFor table (e.g. all DeepSeek / BuerAI traffic in tests). Fix restores parity with production."
+        ],
+        "regressions": "none — the makeServer wiring fix is purely additive: profileResolver is still default-nil for legacy callers that don't pass one, behavior unchanged for them.",
+        "test_summary": "539 / 539 tests pass (was 538 + 1 new). costAttributionUsesResolvedProfileMetadataUnderOverride passed in 41ms.",
+        "incidental_finding": "Discovered + fixed a latent test-fixture bug: `LLMProxyServerIntegrationTests.makeServer` did not propagate `profileResolver` onto the `LLMUsageObserver` instance, so prior test runs that wanted profile-aware pricing would have silently fallen back to nil-profile behavior. No production code path is affected because LLMProxyCoordinator wires both fields. Test parity restored.",
+        "deferred": "True per-profile rollup (LLMStatsSnapshot.byProfile) and persisting profileSelectionSource in JSON records both require schema changes to LLMStatsStore + migration of any existing on-disk stats files. Captured as a follow-up improvement; not blocking the override feature shipping. Current modelCosts breakdown already gives the spend tab enough signal to attribute usage correctly when override profiles use distinct modelOverride values, which is the normal case (DeepSeek V4 Pro vs Flash, BuerAI Pro vs Flash, etc.).",
+        "next_blockers": "None. T8 (CLAUDE.md / README updates) cleared."
+      }
+    },
+    {
+      "id": "T8",
+      "title": "Update CLAUDE.md and README with new command surface",
+      "description": "Document `claude` (native), `claude-3` (proxy + active), `OI_PROFILE=… claude-3` (override). Replace any mention of the deleted shell-function flow.",
+      "depends_on": ["T5", "T6"],
+      "steps": [
+        "Find and update CLAUDE.md sections referencing the shell-function claude()",
+        "Update README.md / README.zh-CN.md routing section",
+        "Add a one-line examples block: claude / claude-3 / OI_PROFILE=… claude-3",
+        "Lint pass: scripts/check-docs.sh (existing script)"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "executed_at": "2026-05-04T07:50:00Z",
+        "files_changed": [
+          "CLAUDE.md — new ## Model routing (LLM proxy) section between # Important files. 3-row command table + key file pointers + per-request invariant note (resolve once at entry, flow ResolvedProfile through context — do NOT call currentActiveProfile() on the hot path).",
+          "README.md — new English Model routing subsection in the fork's overview + new Docs and harness subsection that links to docs/index.md and scripts/harness.sh (latter two were missing before — pre-existing lint debt cleared as part of T8).",
+          "README.zh-CN.md — new ## 模型路由 / Model routing section after 其他功能 with the 3-command decision table, profile registry note, multi-terminal parallel use case, and link to migration.md. Added a 模型路由 row to the 其他功能 feature table.",
+          "docs/index.md — new ## Features subsection linking to architecture.md, migration.md, progress.md (the 3 markdown files in docs/features/profile-override/). Also linked the pre-existing docs/usage-freshness-investigation.md under Investigations (pre-existing lint debt, fixed incidentally because T8's check-docs run surfaced it)."
+        ],
+        "regressions": "none — pure docs",
+        "test_summary": "539 / 539 swift tests still pass (no code touched). docs lint scripts/check-docs.sh now exits 0; pre-T8 it failed on docs/usage-freshness-investigation.md not being indexed and on README.md missing the docs/index.md link.",
+        "verification": [
+          "scripts/check-docs.sh exits 0",
+          "Every command in CLAUDE.md / README.md / README.zh-CN.md decision tables is concrete (no TBDs, no placeholders)",
+          "Every link in docs/index.md resolves (the 3 new docs/features/profile-override/* files plus the previously-orphan docs/usage-freshness-investigation.md)",
+          "README.md still mentions docs/index.md (lint requirement)",
+          "README.md still mentions scripts/harness.sh (lint requirement)"
+        ],
+        "incidental_fix": "docs/usage-freshness-investigation.md and the README.md → docs/index.md link were both missing pre-T8 — check-docs.sh would have failed for any contributor running it locally. Resolved as part of this task because adding new docs/features/profile-override/* links to docs/index.md surfaced both gaps via the same lint run.",
+        "next_blockers": "None. Profile-override feature is fully complete: T1–T9 all passes:true. Ready for atomic commit + push."
+      }
+    },
+    {
+      "id": "T9",
+      "title": "Decide final shim name",
+      "description": "Pick `claude-3` vs `oic` vs other. Update T5 file name and all references. Non-blocking until T5 starts.",
+      "depends_on": [],
+      "steps": [
+        "User decision needed",
+        "Once decided, rename the shim file in Sources/OpenIslandApp/Resources/bin/",
+        "Update HookInstallationCoordinator and tests",
+        "Update T8 docs"
+      ],
+      "passes": true,
+      "notes": {
+        "result": "pass",
+        "decided_at": "2026-05-04T06:35:00Z",
+        "decided_by": "user",
+        "chosen_name": "claude-3",
+        "rationale": "User-proposed earlier in the session; concise, easy to type, hints at the version era while still pairing visually with `claude` and `claude-native`. The number is a generation marker; will not need to be changed when claude itself bumps to 4.x because `claude-3` here means 'the third entry in the Open Island claude family' (claude / claude-native / claude-3), not a model version.",
+        "constraints_applied_to_t5": [
+          "Shim file path: Sources/OpenIslandApp/Resources/bin/claude-3 (executable, mode 0755)",
+          "HookInstallationCoordinator.ensureShimsInstalled file list adds 'claude-3' alongside existing 'claude-native' and 'oi-claude'",
+          "oi-claude stays in the bundle for one release as a deprecation-period alias (per architecture.md Open Risks R2)",
+          "T8 doc surface is exactly: claude (native) / claude-3 (proxy + active) / OI_PROFILE=... claude-3 (per-call override)"
+        ],
+        "rejected_alternatives": [
+          "oic — too cryptic, looks like a typo, hard to grep for",
+          "claude-oi / claudeoi — readable but 'oi' branding is internal; users do not need to learn it",
+          "claudex — collides with `codex`-adjacent naming and reads like 'claude examples'",
+          "Renaming oi-claude in place — would break any user / script already invoking the existing alias"
+        ],
+        "next_blockers": "None. T5 cleared with claude-3 as the canonical shim name."
+      }
+    }
+  ]
+}

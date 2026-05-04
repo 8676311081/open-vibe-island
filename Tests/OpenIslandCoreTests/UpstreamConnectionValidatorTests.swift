@@ -172,4 +172,57 @@ struct UpstreamConnectionValidatorTests {
         )
         _ = await validator.validate(key: "sk-test", model: "my-custom-model")
     }
+    @Test
+    func canonicalizesOpenAIStyleV1BaseForAnthropicProbe() async {
+        ValidatorMockProtocol.setResponder { req in
+            #expect(req.url?.host == "api.buerai.top")
+            #expect(req.url?.path == "/v1/messages")
+            return ValidatorMockProtocol.Response(statusCode: 200)
+        }
+        defer { ValidatorMockProtocol.setResponder(nil) }
+
+        let validator = UpstreamConnectionValidator(
+            baseURL: URL(string: "https://api.buerai.top/v1")!,
+            session: Self.makeSession()
+        )
+        #expect(validator.baseURL.absoluteString == "https://api.buerai.top")
+        let result = await validator.validate(key: "sk-test", model: "claude-opus-4-6")
+        #expect(result == .valid)
+    }
+
+    @Test
+    func fetchModelsRetriesTransientNetworkReset() async {
+        final class Counter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func next() -> Int { lock.lock(); defer { lock.unlock() }; value += 1; return value }
+        }
+        let counter = Counter()
+        let modelsJSON = Data(#"{"data":[{"id":"claude-opus-4-6"},{"id":"deepseek-v4-pro"}]}"#.utf8)
+        ValidatorMockProtocol.setResponder { _ in
+            if counter.next() == 1 {
+                return ValidatorMockProtocol.Response(
+                    terminalError: NSError(
+                        domain: NSURLErrorDomain,
+                        code: NSURLErrorNetworkConnectionLost
+                    )
+                )
+            }
+            return ValidatorMockProtocol.Response(
+                statusCode: 200,
+                headers: ["content-type": "application/json"],
+                bodyData: modelsJSON
+            )
+        }
+        defer { ValidatorMockProtocol.setResponder(nil) }
+
+        let validator = UpstreamConnectionValidator(
+            baseURL: URL(string: "https://api.buerai.top")!,
+            maxAttempts: 2,
+            session: Self.makeSession()
+        )
+        let models = await validator.fetchModels(key: "sk-test")
+        #expect(models == ["claude-opus-4-6", "deepseek-v4-pro"])
+    }
+
 }

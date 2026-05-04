@@ -1,0 +1,41 @@
+#!/bin/zsh
+# Claude Code routed through Open Island proxy with optional
+# per-invocation profile override.
+#
+# Usage:
+#   claude-3 [args...]
+#       Routes through the proxy using the GUI-active profile.
+#   OI_PROFILE=<id> claude-3 [args...]
+#       Routes through the proxy and overrides the profile for THIS
+#       invocation only — does not change the GUI-active profile, so
+#       another terminal's claude-3 keeps using whatever it was on.
+#
+# Environment:
+#   OPEN_ISLAND_PORT  proxy port (default 9710)
+#   OI_PROFILE        per-invocation profile override id (e.g.
+#                     "deepseek-v4-pro", "anthropic-native", or any
+#                     custom profile id from the routing pane). When
+#                     set, the shim encodes the id into the URL as
+#                     /_oi/profile/<id>/ — the proxy strips it at
+#                     request entry, looks up the profile, and uses
+#                     it just for this request. Unknown ids return
+#                     400 with an `available` list at the proxy edge.
+#
+# Pairs with:
+#   claude         — official binary, OAuth direct connect (do not
+#                    touch — Anthropic Max/Pro client identity check
+#                    fails through any proxy).
+#   claude-native  — explicitly bypass the proxy for ambient OAuth.
+#   oi-claude      — legacy alias for proxy routing without the
+#                    OI_PROFILE override knob; will deprecate after
+#                    one release in favor of claude-3.
+
+: "${OPEN_ISLAND_PORT:=9710}"
+
+if [ -n "${OI_PROFILE:-}" ]; then
+    base="http://127.0.0.1:${OPEN_ISLAND_PORT}/_oi/profile/${OI_PROFILE}"
+else
+    base="http://127.0.0.1:${OPEN_ISLAND_PORT}"
+fi
+
+exec env ANTHROPIC_BASE_URL="${base}" claude "$@"

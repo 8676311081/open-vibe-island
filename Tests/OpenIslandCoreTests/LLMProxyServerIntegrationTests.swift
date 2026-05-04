@@ -39,6 +39,14 @@ struct LLMProxyServerIntegrationTests {
             profileResolver: profileResolver
         )
         let observer = LLMUsageObserver(store: store)
+        // Wire the resolver onto the observer too — production does
+        // this in LLMProxyCoordinator so the observer can map
+        // `context.resolvedProfileId` back to a UpstreamProfile for
+        // cost attribution. Pre-T7 the test fixture skipped it
+        // (because no test depended on profile-aware pricing) and
+        // T7's costAttribution test was the first to surface the
+        // missing wire.
+        observer.profileResolver = profileResolver
         server.setObserver(observer)
         try server.start()
         try await server.waitUntilReady(timeout: 3)
@@ -486,6 +494,152 @@ struct LLMProxyServerIntegrationTests {
         let acceptEnc = outbound["Accept-Encoding"] ?? outbound["accept-encoding"] ?? ""
         #expect(acceptEnc.lowercased() == "identity",
                 "outbound Accept-Encoding was \(acceptEnc), expected identity")
+    }
+
+    // MARK: - (h) Cost attribution under per-invocation override
+
+    /// T7 — when a request's resolved profile differs from the GUI
+    /// active default (per-invocation override via URL sentinel),
+    /// the cost recorded in `LLMStatsStore` must use the OVERRIDE
+    /// profile's pricing rather than the active profile's.
+    ///
+    /// Setup uses two requests with identical token usage:
+    /// - Request (a): no sentinel → request body keeps
+    ///   `model: claude-opus-4-7` → `LLMPricing.priceFor` returns
+    ///   the static-table value. Recorded under the `claude-opus-4-7`
+    ///   key with static pricing.
+    /// - Request (b): sentinel `/_oi/profile/deepseek-v4-pro/...` →
+    ///   body rewriter substitutes `model: deepseek-v4-pro` before
+    ///   forward; mock SSE echoes the rewritten id; `priceFor` returns
+    ///   nil; observer falls through to the resolved profile's
+    ///   `costMetadata` (the discounted DeepSeek rate). Recorded
+    ///   under the `deepseek-v4-pro` key with metadata pricing.
+    ///
+    /// Static price is ≫ metadata price for the same usage; the
+    /// test asserts both are non-zero AND the static path is at
+    /// least 5× the metadata path so a future pricing tweak in
+    /// either direction (within reason) doesn't break the test.
+    @Test
+    func costAttributionUsesResolvedProfileMetadataUnderOverride() async throws {
+        // Use a real UpstreamProfileStore so the resolver knows about
+        // the deepseek-v4-pro built-in profile (test fakes that ship
+        // a single active wouldn't satisfy `profile(id:)` lookup).
+        let suiteName = "OpenIsland.LLMProxy.test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let resolver = UpstreamProfileStore(userDefaults: defaults)
+        // Default active = anthropic-native. We have to ALSO override
+        // `configuration.anthropicUpstream` away from api.anthropic.com
+        // — otherwise request (a) (no sentinel, active=native, no
+        // stored key) would trip the 409 OAuth-passthrough gate before
+        // reaching forward(). Using a `.example` host both routes the
+        // request through forward() and keeps it inside MockUpstreamProtocol.
+        let nativeGateway = URL(string: "https://native-gateway.example")!
+        let (server, store, port, storeURL) = try await Self.makeServer(
+            anthropicMock: nativeGateway,
+            profileResolver: resolver
+        )
+        defer {
+            Self.teardown(server, storeURL)
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        // Echoing SSE responder: read the request body to pick up the
+        // model id (which the proxy may have rewritten from
+        // claude-opus-4-7 → deepseek-v4-pro) and parrot it back in
+        // message_start so the observer attributes the recorded
+        // bucket under the rewritten id.
+        MockUpstreamProtocol.setResponder { request in
+            let body: Data = {
+                if let direct = request.httpBody { return direct }
+                if let stream = request.httpBodyStream {
+                    stream.open()
+                    defer { stream.close() }
+                    var data = Data()
+                    var buf = [UInt8](repeating: 0, count: 4096)
+                    while stream.hasBytesAvailable {
+                        let n = stream.read(&buf, maxLength: buf.count)
+                        if n <= 0 { break }
+                        data.append(buf, count: n)
+                    }
+                    return data
+                }
+                return Data()
+            }()
+            let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+            let model = (json?["model"] as? String) ?? "claude-opus-4-7"
+            // Same usage either request — input=100, output=42,
+            // cache_read=50. Trailing newline matters: SSE event
+            // termination is a blank line, the multi-line literal
+            // would otherwise miss the final \n\n.
+            let sse = """
+            event: message_start
+            data: {"type":"message_start","message":{"id":"m_1","model":"\(model)","usage":{"input_tokens":100,"output_tokens":1,"cache_read_input_tokens":50,"cache_creation_input_tokens":0}}}
+
+            event: content_block_delta
+            data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}
+
+            event: message_delta
+            data: {"type":"message_delta","delta":{},"usage":{"output_tokens":42}}
+
+            """ + "\n"
+            return MockUpstreamProtocol.Response(
+                statusCode: 200,
+                headers: ["Content-Type": "text/event-stream"],
+                bodyChunks: [Data(sse.utf8)]
+            )
+        }
+
+        // (a) — no override.
+        var reqA = URLRequest(url: Self.proxyURL(port: port, path: "/v1/messages"))
+        reqA.httpMethod = "POST"
+        reqA.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        reqA.setValue("claude-cli/2.1.123", forHTTPHeaderField: "User-Agent")
+        reqA.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+        _ = try await Self.makeClientSession().data(for: reqA)
+
+        // (b) — override via URL sentinel.
+        let sentinelURL = URL(string: "http://127.0.0.1:\(port)/_oi/profile/deepseek-v4-pro/v1/messages")!
+        var reqB = URLRequest(url: sentinelURL)
+        reqB.httpMethod = "POST"
+        reqB.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        reqB.setValue("claude-cli/2.1.123", forHTTPHeaderField: "User-Agent")
+        // Client still sends Anthropic id; proxy rewrites to override
+        // profile's modelOverride before forward.
+        reqB.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+        _ = try await Self.makeClientSession().data(for: reqB)
+
+        // Wait for both observer writes to drain into the store.
+        // `awaitStatsRecorded` only waits until any day shows up; we
+        // need both expected model rows present.
+        let dayKey = LLMStatsStore.dayKey(for: Date())
+        let deadline = Date().addingTimeInterval(3)
+        var bucket: LLMDayBucket?
+        while Date() < deadline {
+            let snap = await store.currentSnapshot()
+            if let candidate = snap.days[dayKey]?[LLMClient.claudeCode.rawValue],
+               candidate.modelCosts["claude-opus-4-7"] != nil,
+               candidate.modelCosts["deepseek-v4-pro"] != nil
+            {
+                bucket = candidate
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let bucketResolved = try #require(bucket, "bucket never accumulated both expected model rows")
+
+        let staticCost = bucketResolved.modelCosts["claude-opus-4-7"] ?? 0
+        let metaCost = bucketResolved.modelCosts["deepseek-v4-pro"] ?? 0
+        #expect(staticCost > 0,
+                "non-override request must record a non-zero claude-opus-4-7 cost; got \(staticCost)")
+        #expect(metaCost > 0,
+                "override request must record a non-zero deepseek-v4-pro cost; got \(metaCost)")
+        // Static ≈ $0.001575 (5 + 0.025 + 1.05 / 1k), metadata
+        // discounted is ≈ $0.00008. Ratio is ≈ 19×; assert ≥ 5× to
+        // tolerate any reasonable future pricing tweak in either
+        // direction without rewriting the test.
+        #expect(staticCost > metaCost * 5,
+                "override profile metadata pricing must be substantially below the static claude-opus-4-7 rate; static=\(staticCost) meta=\(metaCost)")
     }
 
     // MARK: - (g) Anthropic OAuth-passthrough gate returns 409

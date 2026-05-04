@@ -150,6 +150,31 @@ struct LLMRequestRewriterModelFieldTests {
     }
 
     @Test
+    func directProfileVariantRewritesWithoutResolverIndirection() {
+        // T2 introduced `rewriteModelFieldIfNeeded(_:path:profile:)`
+        // — the proxy hot path resolves once at request entry, then
+        // passes the resolved profile here, eliminating the late
+        // `currentActiveProfile()` read that risked tearing a
+        // request between resolution and forward. Verify the new
+        // direct-profile entry produces the same body mutation as
+        // the resolver-based variant for an equivalent profile.
+        let direct = LLMRequestRewriter.rewriteModelFieldIfNeeded(
+            Self.bodyAnthropicOpus,
+            path: "/v1/messages",
+            profile: BuiltinProfiles.deepseekV4Pro
+        )
+        #expect(Self.decodedModel(direct) == "deepseek-v4-pro")
+
+        // Direct variant also no-ops on a passthrough profile.
+        let untouched = LLMRequestRewriter.rewriteModelFieldIfNeeded(
+            Self.bodyAnthropicOpus,
+            path: "/v1/messages",
+            profile: BuiltinProfiles.anthropicNative
+        )
+        #expect(untouched == Self.bodyAnthropicOpus)
+    }
+
+    @Test
     func nonRewriteablePathPassesThrough() {
         // /v1/models is an admin endpoint that doesn't take a body
         // model field; we must not blindly rewrite it just because

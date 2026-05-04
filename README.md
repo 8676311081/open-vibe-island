@@ -126,6 +126,25 @@ swift build && swift run OpenIslandApp
 
 Requires macOS 14+. Supports Apple Silicon and Intel.
 
+### Model routing — claude / claude-3 / OI_PROFILE
+
+Open Island runs a local proxy on `127.0.0.1:9710` for cross-provider
+routing + spend tracking. Three commands map to three intents:
+
+| Command | What it does |
+|---|---|
+| `claude …` | Official binary, untouched. Direct OAuth to api.anthropic.com — use for Anthropic Max / Pro subscriptions. |
+| `claude-3 …` | Goes through the proxy with the GUI-active profile. |
+| `OI_PROFILE=<id> claude-3 …` | Per-invocation override — pick a different profile (e.g. `deepseek-v4-pro`) just for this call without touching the GUI selection. |
+
+Migrating from the legacy `~/.zshrc` `claude()` hijack? See
+[docs/features/profile-override/migration.md](docs/features/profile-override/migration.md).
+
+### Docs and harness
+
+- [docs/index.md](docs/index.md) for the full repository map (architecture, hooks, features, releases)
+- [scripts/harness.sh](scripts/harness.sh) for the local CI harness used during development
+
 ---
 
 ## 致谢

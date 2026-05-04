@@ -102,8 +102,40 @@ Open Island 驻留在 Mac 的**刘海区域**（或顶部栏），为你的 AI c
 | 会话发现 | 从本地 transcript 自动发现，跨启动持久化 |
 | 自动更新 | 基于 Sparkle 的自动更新 |
 | 签名公证 | DMG 打包，Apple 公证 |
+| 模型路由 | 本地代理 + 多后端切换；详见下方"模型路由"章节 |
 
 </details>
+
+## 模型路由 / Model routing
+
+Open Island 在 `127.0.0.1:9710` 跑一个本地代理，用于跨提供商请求改写
+（同一个 Claude CLI 调用可以打到 Anthropic / DeepSeek / BuerAI / 你自定义
+的上游）和统一花销统计。三个命令对应三个意图：
+
+| 命令 | 走不走代理 | 适合场景 |
+|---|---|---|
+| `claude …` | **不走** —— 原版二进制不动，直连 `api.anthropic.com` | Anthropic Max / Pro 订阅 |
+| `claude-3 …` | 走 | 用 Open Island 路由面板里**选中**那张卡片对应的 profile |
+| `OI_PROFILE=<id> claude-3 …` | 走 | 这一次调用临时换一个 profile（不影响 GUI 选择，也不影响别的终端） |
+
+**Profile 列表**：内建 `anthropic-native`、`deepseek-v4-pro`、
+`deepseek-v4-flash`，加上你在路由面板里手动添加的自定义 profile（每张
+卡片自己有 id）。打错 id 时代理直接返回 **400** 并在 `available`
+字段列出所有可用 id，不会静默 fallback。
+
+**为啥分两个命令而不是一个**：Anthropic Max / Pro 的 OAuth token 走任何
+代理都失败（端到端客户端身份校验），所以 `claude` 必须保留为不被劫持的
+原版直连通道；要走代理 + 路由的逻辑全部归 `claude-3`。
+
+**多终端并行**：`claude-3` 默认读 GUI active；`OI_PROFILE` 是 per-call
+覆盖。所以终端 A 可以一直用 BuerAI Pro 默认，终端 B 跑脚本时随手套个
+`OI_PROFILE=deepseek-v4-pro`，互不干扰。
+
+**安装**：上述 shim（`claude-3` / `claude-native` / `oi-claude`）由
+Open Island 启动时自动同步到 `~/.open-island/bin/`。把这个目录加到 PATH
+（`path+=("$HOME/.open-island/bin")`）即可。从老版 `~/.zshrc claude()`
+shell 函数迁移到 `claude-3` 的详细步骤见
+[docs/features/profile-override/migration.md](docs/features/profile-override/migration.md)。
 
 ## 快速开始
 

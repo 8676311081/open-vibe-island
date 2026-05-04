@@ -205,19 +205,42 @@ public enum LLMPricing {
         usage: TokenUsage,
         profileResolver: (any UpstreamProfileResolver)?
     ) -> Double? {
+        // Compat shim: legacy call sites that have a resolver but
+        // haven't yet plumbed a resolved profile through. Reads
+        // active state once and delegates to the direct-profile
+        // variant. Prefer the direct-profile variant for any code on
+        // the proxy hot path so a mid-request active flip cannot
+        // mis-attribute cost.
+        costUSD(
+            model: model,
+            usage: usage,
+            activeProfile: profileResolver?.currentActiveProfile()
+        )
+    }
+
+    /// Direct-profile variant. The proxy / observer resolves the
+    /// profile once at request entry (T2+) and passes the result
+    /// here. Behavior is identical to the resolver-based overload.
+    /// Pass `nil` when no profile context is available — falls back
+    /// to the static price table only.
+    public static func costUSD(
+        model: String?,
+        usage: TokenUsage,
+        activeProfile: UpstreamProfile?
+    ) -> Double? {
         if let p = priceFor(model: model) {
             return computeCost(p, usage: usage)
         }
-        guard let resolver = profileResolver, let model, !model.isEmpty else {
+        guard let profile = activeProfile, let model, !model.isEmpty else {
             return nil
         }
-        // Reverse-lookup: find a profile whose modelOverride equals
-        // the model id the body rewriter substituted. This is a two-
-        // entry walk for the current built-in set (anthropic-native
-        // has nil modelOverride, so the only hits are DSV4P/Flash).
-        let active = resolver.currentActiveProfile()
-        guard active.modelOverride == model || active.id == model,
-              let meta = active.costMetadata else {
+        // Reverse-lookup: a profile whose modelOverride equals the
+        // model id the body rewriter substituted. Two-entry walk for
+        // the current built-in set (anthropic-native has nil
+        // modelOverride, so the only hits are DSV4P/Flash and any
+        // custom profile that pinned a model id).
+        guard profile.modelOverride == model || profile.id == model,
+              let meta = profile.costMetadata else {
             return nil
         }
         return meta.costUSD(

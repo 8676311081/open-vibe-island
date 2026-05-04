@@ -40,6 +40,16 @@ public struct LLMProxyRequestContext: Sendable {
     public let requestBody: Data
     public let receivedAt: Date
     public let userAgent: String?
+    /// Profile id this request was resolved against, captured at
+    /// `handleParsedRequest` entry. Stable for the request lifetime
+    /// even if the GUI's active profile flips mid-flight. `nil` only
+    /// when the proxy was constructed without a `profileResolver`
+    /// (legacy / test paths that do not exercise routing).
+    public let resolvedProfileId: String?
+    /// Whether `resolvedProfileId` came from the GUI active default
+    /// or a per-request override (URL sentinel in T3+). Observers
+    /// use this to label spend records.
+    public let profileSelectionSource: ProfileSelectionSource?
 
     public init(
         id: UUID,
@@ -49,7 +59,9 @@ public struct LLMProxyRequestContext: Sendable {
         requestHeaders: [(name: String, value: String)],
         requestBody: Data,
         receivedAt: Date,
-        userAgent: String?
+        userAgent: String?,
+        resolvedProfileId: String? = nil,
+        profileSelectionSource: ProfileSelectionSource? = nil
     ) {
         self.id = id
         self.upstream = upstream
@@ -59,6 +71,8 @@ public struct LLMProxyRequestContext: Sendable {
         self.requestBody = requestBody
         self.receivedAt = receivedAt
         self.userAgent = userAgent
+        self.resolvedProfileId = resolvedProfileId
+        self.profileSelectionSource = profileSelectionSource
     }
 }
 
@@ -369,7 +383,16 @@ public final class LLMProxyServer: @unchecked Sendable {
         head: LLMProxyHTTP.RequestHead,
         body: Data
     ) {
-        if head.path == "/healthz" || head.path == "/healthz/" {
+        // T3 — parse the URL-sentinel for per-invocation profile
+        // override BEFORE any path-based decisions. The sentinel
+        // pattern is `/_oi/profile/<id>/...`; absence yields
+        // (overrideId: nil, requestPath: head.path). Everything
+        // downstream from here uses `requestPath`, never head.path,
+        // so upstream never sees the sentinel and routing decisions
+        // are made against the user's intended endpoint.
+        let (overrideId, requestPath) = Self.parseSentinel(path: head.path)
+
+        if requestPath == "/healthz" || requestPath == "/healthz/" {
             respondLocally(
                 state: state,
                 status: 200,
@@ -379,15 +402,54 @@ public final class LLMProxyServer: @unchecked Sendable {
             return
         }
 
+        // Resolve the profile once at request entry. With
+        // `overrideId == nil` this returns the GUI active default;
+        // with a non-nil id it returns the override profile and
+        // throws `.unknownOverride` if the id is not registered.
+        // T4: explicit catch on `unknownOverride` → 400 with a
+        // structured JSON body listing available ids so the user
+        // sees the typo at the proxy edge instead of a confusing
+        // 401 from upstream. Other thrown errors are unexpected
+        // (the protocol only declares `unknownOverride` today) but
+        // we degrade to a 500 rather than crash the connection.
+        let resolved: ResolvedProfile?
+        if let resolver = profileResolver {
+            do {
+                resolved = try resolver.resolveProfile(overrideId: overrideId)
+            } catch UpstreamProfileResolverError.unknownOverride(let id) {
+                respondLocally(
+                    state: state,
+                    status: 400,
+                    body: Self.makeUnknownOverrideBody(
+                        id: id,
+                        available: resolver.availableProfileIds()
+                    )
+                )
+                return
+            } catch {
+                respondLocally(
+                    state: state,
+                    status: 500,
+                    body: #"{"type":"error","error":{"type":"open_island_internal","message":"profile resolution failed unexpectedly"}}"#
+                )
+                return
+            }
+        } else {
+            resolved = nil
+        }
+
         let upstream = LLMUpstreamRouter.route(
-            path: head.path,
+            path: requestPath,
             headers: head.lowercasedHeaders
         )
         let upstreamBase: URL
         switch upstream {
         case .anthropic:
-            upstreamBase = resolvedAnthropicUpstream()
-            if isAnthropicPassthroughBlocked(upstreamBase: upstreamBase) {
+            upstreamBase = upstreamForAnthropic(resolved: resolved)
+            if isAnthropicPassthroughBlocked(
+                upstreamBase: upstreamBase,
+                resolved: resolved
+            ) {
                 respondLocally(
                     state: state,
                     status: 409,
@@ -409,18 +471,17 @@ public final class LLMProxyServer: @unchecked Sendable {
         // for the full rationale (items #2 and #4 of the audit list).
         // Item #2 is OpenAI-only (chat/completions usage opt-in).
         // Item #4 is profile-driven model rewrite — covers Anthropic
-        // and OpenAI paths alike since the active profile's
-        // modelOverride applies to whatever the active upstream
-        // expects.
+        // and OpenAI paths alike since the resolved profile's
+        // modelOverride applies to whatever the upstream expects.
         var outboundBody: Data = body
-        if upstream == .openai, LLMRequestRewriter.shouldRewrite(path: head.path) {
+        if upstream == .openai, LLMRequestRewriter.shouldRewrite(path: requestPath) {
             outboundBody = LLMRequestRewriter.rewrittenChatCompletionsBody(outboundBody)
         }
-        if let resolver = profileResolver {
+        if let resolved {
             outboundBody = LLMRequestRewriter.rewriteModelFieldIfNeeded(
                 outboundBody,
-                path: head.path,
-                profileResolver: resolver
+                path: requestPath,
+                profile: resolved.profile
             )
         }
 
@@ -428,11 +489,19 @@ public final class LLMProxyServer: @unchecked Sendable {
             id: UUID(),
             upstream: upstream,
             method: head.method,
-            path: head.path,
+            // T3: `path` is the **stripped** path (sentinel removed).
+            // Observers / pricing already key off this via
+            // /v1/messages vs /v1/chat/completions vs /v1/responses
+            // detection; passing the raw sentinel-bearing path would
+            // break their endpoint recognition. Forwarding to upstream
+            // also uses this stripped path.
+            path: requestPath,
             requestHeaders: head.headers,
             requestBody: outboundBody,
             receivedAt: Date(),
-            userAgent: head.header("user-agent")
+            userAgent: head.header("user-agent"),
+            resolvedProfileId: resolved?.profile.id,
+            profileSelectionSource: resolved?.source
         )
 
         if let observer {
@@ -441,44 +510,52 @@ public final class LLMProxyServer: @unchecked Sendable {
             Task { await captured.proxyWillForward(ctx) }
         }
 
-        forward(context: context, upstreamBase: upstreamBase, state: state)
+        forward(
+            context: context,
+            upstreamBase: upstreamBase,
+            resolved: resolved,
+            state: state
+        )
     }
 
     // MARK: - Active-profile routing
 
     /// Resolve the upstream URL for an Anthropic-format request,
-    /// preferring the user's selected `UpstreamProfile.baseURL` over
-    /// the static `configuration.anthropicUpstream` field.
+    /// preferring the resolved profile's `baseURL` over the static
+    /// `configuration.anthropicUpstream` field.
     ///
     /// The static `configuration.anthropicUpstream` predates the
-    /// profile system. We keep its semantics narrow now: it ONLY
-    /// applies when the active profile is the built-in
-    /// `anthropic-native` AND the value has been explicitly
-    /// overridden away from the built-in default
-    /// (`https://api.anthropic.com`). That preserves the self-hosted-
-    /// gateway escape hatch (LLMSpend settings → "Anthropic upstream
-    /// URL") for users pointing at an Anthropic-compatible proxy
-    /// without registering it as a custom profile. For every other
-    /// active profile (DeepSeek V4 Pro/Flash, custom), the profile's
-    /// own `baseURL` wins — the override field is bypassed entirely.
+    /// profile system. Semantics now:
+    /// - When `resolved == nil` (no resolver wired): return the
+    ///   static config value verbatim — preserves legacy test paths.
+    /// - When the resolved profile is the built-in `anthropic-native`
+    ///   AND the static config has been overridden away from the
+    ///   built-in default (`https://api.anthropic.com`): use the
+    ///   override. This is the self-hosted-gateway escape hatch
+    ///   (LLMSpend settings → "Anthropic upstream URL") for users
+    ///   pointing at an Anthropic-compatible proxy without
+    ///   registering it as a custom profile.
+    /// - For every other resolved profile (DeepSeek V4 Pro/Flash,
+    ///   custom, or `anthropic-native` with default config): the
+    ///   profile's own `baseURL` wins.
     ///
-    /// When `profileResolver` is `nil` (legacy callers / test helpers
-    /// that don't wire routing), the behavior collapses to the pre-
-    /// 4.6 path: always return `configuration.anthropicUpstream`. So
-    /// existing tests don't need to thread a resolver through.
-    private func resolvedAnthropicUpstream() -> URL {
-        guard let resolver = profileResolver else {
+    /// T3 changed the parameter from "current active profile, read
+    /// inline" to "resolved profile, passed in". Per-invocation
+    /// override now naturally flows through this helper because
+    /// `handleParsedRequest` passes the resolved profile (which may
+    /// be from override) here.
+    private func upstreamForAnthropic(resolved: ResolvedProfile?) -> URL {
+        guard let profile = resolved?.profile else {
             return configuration.anthropicUpstream
         }
-        let active = resolver.currentActiveProfile()
-        if active.id == BuiltinProfiles.anthropicNative.id {
+        if profile.id == BuiltinProfiles.anthropicNative.id {
             let configured = configuration.anthropicUpstream
             let defaultUpstream = BuiltinProfiles.anthropicNative.baseURL
             if configured != defaultUpstream {
                 return configured
             }
         }
-        return active.baseURL
+        return profile.baseURL
     }
 
     /// Mirror of `ModelRoutingDerivation.isBlocked` on the router
@@ -498,15 +575,24 @@ public final class LLMProxyServer: @unchecked Sendable {
     /// already returns that override, so the host check below fails
     /// and we forward as usual.
     ///
-    /// Returns `false` when `profileResolver == nil` (legacy callers
+    /// Returns `false` when `resolved == nil` (legacy callers
     /// without routing) — those paths trust the static config and
-    /// shouldn't be regulated retroactively.
-    private func isAnthropicPassthroughBlocked(upstreamBase: URL) -> Bool {
-        guard let resolver = profileResolver else { return false }
+    /// shouldn't be regulated retroactively. T3 changed the input
+    /// from "active profile, read inline" to "the resolved profile
+    /// for this request" so per-invocation override is honored: if
+    /// the override targets a passthrough Anthropic profile, the
+    /// gate fires; if the override targets DeepSeek, the gate
+    /// no-ops correctly even when the user's GUI active is
+    /// passthrough.
+    private func isAnthropicPassthroughBlocked(
+        upstreamBase: URL,
+        resolved: ResolvedProfile?
+    ) -> Bool {
+        guard let profile = resolved?.profile else { return false }
         guard upstreamBase.host?.lowercased() == "api.anthropic.com" else {
             return false
         }
-        return resolver.currentActiveProfile().keychainAccount == nil
+        return profile.keychainAccount == nil
     }
 
     /// 409 body returned when `isAnthropicPassthroughBlocked` fires.
@@ -517,11 +603,46 @@ public final class LLMProxyServer: @unchecked Sendable {
     /// upstream-issued errors.
     static let anthropicOAuthBlockedBody = #"{"type":"error","error":{"type":"open_island_oauth_blocked","message":"Anthropic OAuth credentials cannot pass through Open Island. Anthropic enforces end-to-end client identity verification on Max/Pro tokens which the proxy cannot relay. Run `claude` via the `claude-native` shim (~/.open-island/bin/claude-native) to bypass the proxy, or activate a profile with a stored API key (e.g. DeepSeek V4 Pro) in the routing pane."}}"#
 
+    /// 400 body returned when the URL sentinel carried a profile id
+    /// that the resolver does not know. JSON shape mirrors the
+    /// Anthropic-style error envelope (matches the 409 OAuth body)
+    /// so well-behaved clients log it via the same path they log
+    /// upstream errors. The `available` array gives users a concrete
+    /// list of valid alternatives so a typo is one fix away.
+    /// Built at runtime because the unknown id and the available
+    /// list are dynamic.
+    static func makeUnknownOverrideBody(
+        id: String,
+        available: [String]
+    ) -> String {
+        let payload: [String: Any] = [
+            "type": "error",
+            "error": [
+                "type": "unknown_open_island_profile",
+                "id": id,
+                "available": available,
+                "message": "OI_PROFILE / URL sentinel referenced a profile id that is not registered. Pick one of the values in `available`, or omit OI_PROFILE to use the GUI-active profile."
+            ] as [String: Any]
+        ]
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: payload),
+            let s = String(data: data, encoding: .utf8)
+        else {
+            // Defensive fallback. This should never trigger because
+            // every value above is a String / [String], all of which
+            // JSONSerialization handles natively. Keep the fallback
+            // valid JSON so client error parsers do not blow up.
+            return #"{"type":"error","error":{"type":"unknown_open_island_profile"}}"#
+        }
+        return s
+    }
+
     // MARK: - Forwarding
 
     private func forward(
         context: LLMProxyRequestContext,
         upstreamBase: URL,
+        resolved: ResolvedProfile?,
         state: ProxyConnectionState
     ) {
         guard let url = Self.combineUpstream(base: upstreamBase, requestTarget: context.path) else {
@@ -541,11 +662,10 @@ public final class LLMProxyServer: @unchecked Sendable {
         // `credentialsStore` is nil (no provider routing wired) it's
         // a no-op.
         var forwardHeaders = context.requestHeaders
-        if let store = credentialsStore, let resolver = profileResolver {
+        if let store = credentialsStore, let profile = resolved?.profile {
             LLMRequestRewriter.rewriteAuthorizationIfNeeded(
                 &forwardHeaders,
-                upstreamURL: url,
-                profileResolver: resolver,
+                profile: profile,
                 credentialsStore: store
             )
         }
@@ -617,6 +737,43 @@ public final class LLMProxyServer: @unchecked Sendable {
         if baseString.hasSuffix("/") { baseString.removeLast() }
         let suffix = requestTarget.hasPrefix("/") ? requestTarget : "/" + requestTarget
         return URL(string: baseString + suffix)
+    }
+
+    /// Per-invocation override sentinel: when the `claude-3` shim
+    /// (T5) sets `ANTHROPIC_BASE_URL=http://127.0.0.1:9710/_oi/profile/<id>`
+    /// from `$OI_PROFILE`, the inbound request-target arrives at the
+    /// proxy as `/_oi/profile/<id>/v1/messages`. This helper splits
+    /// that into the override id and the cleaned request-path the
+    /// rest of the proxy operates on. Anything not starting with the
+    /// sentinel prefix passes through unchanged with `overrideId =
+    /// nil`. Empty ids (e.g. literal `/_oi/profile//...`) are
+    /// rejected as malformed and treated as "no sentinel" — silent
+    /// fallback is the right call here because matched-but-empty
+    /// looks like a shim bug, not a user typo, and we'd rather
+    /// degrade to the active default than 400 a request that was
+    /// almost certainly fine. T4 will tighten the unknown-id case.
+    static func parseSentinel(path: String) -> (overrideId: String?, requestPath: String) {
+        let prefix = "/_oi/profile/"
+        guard path.hasPrefix(prefix) else {
+            return (nil, path)
+        }
+        let after = path.dropFirst(prefix.count)
+        if let slash = after.firstIndex(of: "/") {
+            let id = String(after[..<slash])
+            let rest = String(after[slash...])
+            if id.isEmpty {
+                return (nil, path)
+            }
+            return (id, rest)
+        }
+        // Sentinel without a trailing path segment — the entire tail
+        // is the id; treat the request-path as `/`. Useful for
+        // probes like `curl /_oi/profile/<id>` (no further segments).
+        let id = String(after)
+        if id.isEmpty {
+            return (nil, path)
+        }
+        return (id, "/")
     }
 
     static func reasonPhrase(for status: Int) -> String {

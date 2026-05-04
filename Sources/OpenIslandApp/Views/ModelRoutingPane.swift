@@ -804,6 +804,14 @@ private struct CustomProfileSheet: View {
         return url
     }
 
+    /// The URL we persist in the routing profile. If a user pastes an
+    /// OpenAI-style base URL ending in `/v1`, strip that segment so
+    /// Claude Code's `/v1/messages` target does not become
+    /// `/v1/v1/messages` when proxied.
+    private var canonicalURL: URL? {
+        parsedURL.map(UpstreamConnectionValidator.canonicalAnthropicBaseURL)
+    }
+
     private var effectiveModel: String {
         if let models = fetchedModels, !models.isEmpty {
             return selectedModel.isEmpty ? (models.first ?? "") : selectedModel
@@ -819,7 +827,22 @@ private struct CustomProfileSheet: View {
     }
 
     private var profileID: String {
-        parsedURL?.host?.replacingOccurrences(of: ".", with: "-") ?? "custom"
+        let url = canonicalURL ?? parsedURL
+        let raw = [
+            "custom",
+            url?.host ?? "upstream",
+            url?.path.replacingOccurrences(of: "/", with: "-") ?? "",
+            effectiveModel
+        ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+            .lowercased()
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        let scalars = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(scalars)
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        return collapsed.isEmpty ? "custom-upstream" : collapsed
     }
 
     private var fetchModelsHelp: String? {
@@ -892,6 +915,9 @@ private struct CustomProfileSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: keyText) { _, _ in
                         testResult = nil
+                        fetchedModels = nil
+                        selectedModel = ""
+                        fetchError = nil
                     }
                 if keyText.count < 20 {
                     Text("已输入 \(keyText.count)/20 字符")
@@ -974,7 +1000,7 @@ private struct CustomProfileSheet: View {
     }
 
     private func fetchModelList() async {
-        guard let url = parsedURL else { return }
+        guard let url = canonicalURL else { return }
         isFetchingModels = true
         fetchError = nil
         let validator = UpstreamConnectionValidator(baseURL: url)
@@ -991,7 +1017,7 @@ private struct CustomProfileSheet: View {
     }
 
     private func runConnectionTest() async {
-        guard let url = parsedURL else { return }
+        guard let url = canonicalURL else { return }
         isTesting = true
         let validator = UpstreamConnectionValidator(baseURL: url)
         testResult = await validator.validate(key: keyText, model: effectiveModel)
@@ -999,7 +1025,7 @@ private struct CustomProfileSheet: View {
     }
 
     private func save() {
-        guard let url = parsedURL else { return }
+        guard let url = canonicalURL else { return }
         let model = effectiveModel
         let id = profileID
         let account = "custom-\(id)"

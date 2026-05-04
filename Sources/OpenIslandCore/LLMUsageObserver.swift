@@ -135,10 +135,21 @@ public actor LLMUsageObserver: LLMProxyObserver {
             }
         }
 
+        // Look up the profile snapshot the proxy captured at request
+        // entry (T2+). Falls back to active-profile lookup when the
+        // request didn't carry a resolved id (legacy / no-resolver
+        // path) — semantically equivalent to the pre-T2 behavior.
+        let costProfile: UpstreamProfile? = {
+            if let id = context.resolvedProfileId,
+               let resolved = profileResolver?.profile(id: id) {
+                return resolved
+            }
+            return profileResolver?.currentActiveProfile()
+        }()
         let cost = LLMPricing.costUSD(
             model: state.model,
             usage: usage,
-            profileResolver: profileResolver
+            activeProfile: costProfile
         )
         // Compute waste: tools the model declared but never invoked
         // during the turn. Sum the per-tool estimate from the

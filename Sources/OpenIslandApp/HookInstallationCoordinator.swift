@@ -447,24 +447,50 @@ final class HookInstallationCoordinator {
         }
     }
 
-    /// Copy `claude-native` and `oi-claude` shims from the app bundle
-    /// to `~/.open-island/bin/`. Idempotent — only overwrites when
-    /// the bundle version differs. Call once at startup.
+    /// Bundled CLI shim filenames. These live under
+    /// `Sources/OpenIslandApp/Resources/bin/` in source, but SPM's
+    /// `.process("Resources")` rule flattens the directory at build
+    /// time — so at runtime the files appear at the bundle root next
+    /// to `Info.plist` and the `*.lproj/` localization bundles. A
+    /// `subdirectory: "bin"` lookup returns nothing on a flat bundle,
+    /// which silently breaks the install loop. We instead enumerate
+    /// this explicit list and resolve each at the bundle root. Add a
+    /// new shim filename here when adding a new shim resource.
+    nonisolated static let bundledShimNames: [String] = [
+        "claude-native",
+        "oi-claude",
+        "claude-3",
+    ]
+
+    /// Copy bundled CLI shims to `~/.open-island/bin/`. Idempotent:
+    /// only overwrites when the bundle copy differs from the on-disk
+    /// one. Always sets posix mode 0755 on the destination so the
+    /// shim is executable regardless of the source file's mode bits.
+    ///
+    /// Pre-T5 this used `Bundle.appResources.urls(…, subdirectory:
+    /// "bin")` and was silently broken (SPM flattens the bundle, so
+    /// the subdir lookup returned 0 results and the function early-
+    /// returned without installing anything). The current
+    /// implementation enumerates `bundledShimNames` against the flat
+    /// bundle root, which matches how the resources actually land.
+    ///
+    /// Call once at app startup (from `AppModel`).
     func ensureShimsInstalled() {
         let fileManager = FileManager.default
         let targetDir = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".open-island", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
 
-        guard let shimURLs = Bundle.appResources.urls(
-            forResourcesWithExtension: nil,
-            subdirectory: "bin"
-        ), !shimURLs.isEmpty else { return }
-
         try? fileManager.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
-        for sourceURL in shimURLs {
-            let name = sourceURL.lastPathComponent
+        for name in Self.bundledShimNames {
+            guard let sourceURL = Bundle.appResources.url(
+                forResource: name,
+                withExtension: nil
+            ) else {
+                onStatusMessage?("Shim \(name) missing from bundle")
+                continue
+            }
             let targetURL = targetDir.appendingPathComponent(name)
 
             do {
