@@ -15,15 +15,33 @@ public struct LLMProxyConfiguration: Sendable {
     /// just api.openai.com.
     public var anthropicUpstream: URL
     public var openAIUpstream: URL
+    /// The proxy should not inherit macOS's system proxy settings by
+    /// default. A local LLM proxy is already an explicit routing
+    /// layer; letting CFNetwork auto-discover PAC / NetworkExtension
+    /// proxy state has caused URLSession tasks to stall before any
+    /// outbound socket is opened on systems running Clash-style global
+    /// proxies. Set `OPEN_ISLAND_LLM_PROXY_USE_SYSTEM_PROXY=1` when
+    /// diagnosing or when an upstream truly requires the system proxy.
+    public var bypassSystemProxy: Bool
+    /// Deadline for the first upstream response headers. Long-lived
+    /// SSE streams remain supported because this watchdog disarms as
+    /// soon as URLSession delivers response headers; it only prevents
+    /// pre-connect / proxy-resolution stalls from black-holing the
+    /// local client connection.
+    public var upstreamFirstByteTimeout: TimeInterval
 
     public init(
         port: UInt16 = 9710,
         anthropicUpstream: URL = URL(string: "https://api.anthropic.com")!,
-        openAIUpstream: URL = URL(string: "https://api.openai.com")!
+        openAIUpstream: URL = URL(string: "https://api.openai.com")!,
+        bypassSystemProxy: Bool = true,
+        upstreamFirstByteTimeout: TimeInterval = 30
     ) {
         self.port = port
         self.anthropicUpstream = anthropicUpstream
         self.openAIUpstream = openAIUpstream
+        self.bypassSystemProxy = bypassSystemProxy
+        self.upstreamFirstByteTimeout = upstreamFirstByteTimeout
     }
 
     public static let `default` = LLMProxyConfiguration()
@@ -110,6 +128,7 @@ public final class LLMProxyServer: @unchecked Sendable {
     private var observer: (any LLMProxyObserver)?
     private let session: URLSession
     private let sessionDelegate: ProxyURLSessionDelegate
+    private let sessionDelegateQueue: OperationQueue
     /// Used by `LLMRequestRewriter.rewriteAuthorizationIfNeeded` to
     /// look up the per-provider Keychain credential when the upstream
     /// is non-Anthropic (e.g. DeepSeek). `nil` disables the rewrite —
@@ -145,6 +164,17 @@ public final class LLMProxyServer: @unchecked Sendable {
         cfg.timeoutIntervalForResource = 3600   // ditto
         cfg.httpAdditionalHeaders = nil
         cfg.urlCache = nil
+        let bypassSystemProxy = Self.effectiveBypassSystemProxy(
+            configured: configuration.bypassSystemProxy
+        )
+        if bypassSystemProxy {
+            // Explicitly avoid CFNetwork's system proxy resolver for
+            // the forward path. This keeps LLMProxyServer from hanging
+            // inside NetworkExtension / PAC resolution before an
+            // outbound socket exists. Users who need the system proxy
+            // can opt back in with OPEN_ISLAND_LLM_PROXY_USE_SYSTEM_PROXY=1.
+            cfg.connectionProxyDictionary = [:]
+        }
         // Test injection point: a URLProtocol subclass placed at the
         // head of `protocolClasses` intercepts every outbound request
         // *before* it reaches the network. Production code never sets
@@ -154,11 +184,19 @@ public final class LLMProxyServer: @unchecked Sendable {
             cfg.protocolClasses = additionalProtocolClasses + (cfg.protocolClasses ?? [])
         }
         let delegate = ProxyURLSessionDelegate()
+        let delegateQueue = OperationQueue()
+        delegateQueue.name = "app.openisland.llm-proxy.urlsession"
+        delegateQueue.qualityOfService = .userInitiated
+        delegateQueue.maxConcurrentOperationCount = 8
         self.sessionDelegate = delegate
+        self.sessionDelegateQueue = delegateQueue
         self.session = URLSession(
             configuration: cfg,
             delegate: delegate,
-            delegateQueue: nil
+            delegateQueue: delegateQueue
+        )
+        Self.logger.info(
+            "LLM proxy URLSession configured: delegateQueue=app.openisland.llm-proxy.urlsession maxConcurrent=8 bypassSystemProxy=\(bypassSystemProxy, privacy: .public) firstByteTimeout=\(configuration.upstreamFirstByteTimeout, privacy: .public)s"
         )
     }
 
@@ -189,6 +227,19 @@ public final class LLMProxyServer: @unchecked Sendable {
 
     public func setObserver(_ observer: (any LLMProxyObserver)?) {
         queue.sync { self.observer = observer }
+    }
+
+    static func effectiveBypassSystemProxy(
+        configured: Bool,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        if environment["OPEN_ISLAND_LLM_PROXY_USE_SYSTEM_PROXY"] == "1" {
+            return false
+        }
+        if environment["OPEN_ISLAND_LLM_PROXY_BYPASS_SYSTEM_PROXY"] == "1" {
+            return true
+        }
+        return configured
     }
 
     public func start() throws {
@@ -283,14 +334,12 @@ public final class LLMProxyServer: @unchecked Sendable {
                 Self.logger.debug("connection failed: \(error.localizedDescription)")
                 self?.queue.async { connection.cancel() }
             case let .waiting(error):
-                // NWConnection enters .waiting when the kernel can't
-                // proceed (resource starvation, TCP backoff, system
-                // proxy interference). On loopback this should be
-                // brief or non-existent; treating it as a failure
-                // prevents stale .waiting connections from sitting
-                // forever and chewing through `newConnectionLimit`.
-                Self.logger.debug("connection waiting: \(error.localizedDescription) — cancelling to free slot")
-                self?.queue.async { connection.cancel() }
+                // On loopback, .waiting should not occur during normal
+                // operation. If it does, log for diagnostics but do NOT
+                // cancel the connection — a forwarded URLSession task may
+                // be in flight and needs the connection alive.
+                // Resource cleanup happens in ProxyTaskHandler.
+                Self.logger.debug("connection waiting (not cancelling): \(error.localizedDescription)")
             case .cancelled:
                 break
             default:
@@ -782,7 +831,13 @@ public final class LLMProxyServer: @unchecked Sendable {
             req.httpBody = context.requestBody
         }
 
+        Self.logger.debug(
+            "forward prepare id=\(context.id.uuidString, privacy: .public) method=\(context.method, privacy: .public) path=\(context.path, privacy: .public) upstreamHost=\(url.host ?? "-", privacy: .public) upstreamPath=\(url.path, privacy: .public)"
+        )
         let task = session.dataTask(with: req)
+        Self.logger.debug(
+            "forward task created id=\(context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public)"
+        )
         let handler = ProxyTaskHandler(
             context: context,
             connection: state.connection,
@@ -792,7 +847,40 @@ public final class LLMProxyServer: @unchecked Sendable {
             logger: Self.logger
         )
         sessionDelegate.register(task: task, handler: handler)
+        installFirstByteWatchdogIfNeeded(task: task, handler: handler)
+        Self.logger.debug(
+            "forward task registered id=\(context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public)"
+        )
         task.resume()
+        Self.logger.debug(
+            "forward task resumed id=\(context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public)"
+        )
+        // Once URLSession task is in flight, disable the connection's
+        // stateUpdateHandler. ProxyTaskHandler now owns the connection
+        // lifecycle and will manage cleanup via didCompleteWithError.
+        // This prevents a race where .waiting would cancel the connection
+        // mid-flight.
+        state.connection.stateUpdateHandler = nil
+    }
+
+    private func installFirstByteWatchdogIfNeeded(
+        task: URLSessionDataTask,
+        handler: ProxyTaskHandler
+    ) {
+        let timeout = configuration.upstreamFirstByteTimeout
+        guard timeout > 0 else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + timeout)
+        let delegate = sessionDelegate
+        timer.setEventHandler { [weak handler, weak task, weak delegate] in
+            guard let handler, let task else { return }
+            if handler.handleFirstByteTimeout(timeout: timeout) {
+                task.cancel()
+                delegate?.unregister(task: task)
+            }
+        }
+        handler.setFirstByteWatchdog(timer)
+        timer.resume()
     }
 
     // MARK: - Local responses
@@ -981,6 +1069,10 @@ private final class ProxyURLSessionDelegate: NSObject, URLSessionDataDelegate, @
         lock.unlock()
     }
 
+    func unregister(task: URLSessionTask) {
+        remove(task: task)
+    }
+
     private func handler(for task: URLSessionTask) -> ProxyTaskHandler? {
         lock.lock(); defer { lock.unlock() }
         return handlers[task.taskIdentifier]
@@ -1014,6 +1106,9 @@ private final class ProxyURLSessionDelegate: NSObject, URLSessionDataDelegate, @
             completionHandler(.cancel)
             return
         }
+        h.logger.debug(
+            "forward didReceiveResponse id=\(h.context.id.uuidString, privacy: .public) task=\(dataTask.taskIdentifier, privacy: .public) status=\(httpResp.statusCode, privacy: .public)"
+        )
         h.handleResponseHead(httpResp)
         completionHandler(.allow)
     }
@@ -1023,7 +1118,12 @@ private final class ProxyURLSessionDelegate: NSObject, URLSessionDataDelegate, @
         dataTask: URLSessionDataTask,
         didReceive data: Data
     ) {
-        handler(for: dataTask)?.handleResponseChunk(data)
+        if let h = handler(for: dataTask) {
+            h.logger.debug(
+                "forward didReceiveData id=\(h.context.id.uuidString, privacy: .public) task=\(dataTask.taskIdentifier, privacy: .public) bytes=\(data.count, privacy: .public)"
+            )
+            h.handleResponseChunk(data)
+        }
     }
 
     func urlSession(
@@ -1032,6 +1132,15 @@ private final class ProxyURLSessionDelegate: NSObject, URLSessionDataDelegate, @
         didCompleteWithError error: (any Error)?
     ) {
         if let h = handler(for: task) {
+            if let error {
+                h.logger.debug(
+                    "forward didComplete id=\(h.context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            } else {
+                h.logger.debug(
+                    "forward didComplete id=\(h.context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public) success"
+                )
+            }
             h.handleCompletion(error: error)
         }
         remove(task: task)
@@ -1052,6 +1161,9 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     let healthMonitor: LLMUpstreamHealthMonitor?
     let logger: Logger
     private var sentHeaders = false
+    private var completed = false
+    private let lock = NSLock()
+    private var firstByteWatchdog: DispatchSourceTimer?
     /// Last HTTP status the upstream returned. Drives the
     /// success/failure decision in `handleCompletion`.
     private var lastSeenStatus: Int?
@@ -1072,7 +1184,70 @@ private final class ProxyTaskHandler: @unchecked Sendable {
         self.logger = logger
     }
 
+    func setFirstByteWatchdog(_ timer: DispatchSourceTimer) {
+        lock.lock()
+        firstByteWatchdog = timer
+        lock.unlock()
+    }
+
+    @discardableResult
+    func handleFirstByteTimeout(timeout: TimeInterval) -> Bool {
+        lock.lock()
+        if completed || sentHeaders {
+            lock.unlock()
+            return false
+        }
+        completed = true
+        firstByteWatchdog = nil
+        lock.unlock()
+
+        logger.error(
+            "forward first-byte timeout id=\(self.context.id.uuidString, privacy: .public) upstream=\(self.context.path, privacy: .public) timeout=\(timeout, privacy: .public)s"
+        )
+        let body = #"{"error":"upstream did not respond before first-byte timeout"}"#
+        let bodyData = Data(body.utf8)
+        let header = LLMProxyHTTP.formatResponseHeader(
+            statusCode: 504,
+            reasonPhrase: "Gateway Timeout",
+            headers: [
+                ("Content-Type", "application/json; charset=utf-8"),
+                ("Content-Length", "\(bodyData.count)"),
+            ]
+        )
+        var packet = header
+        packet.append(bodyData)
+        connection.send(content: packet, isComplete: true, completion: .contentProcessed { [connection] _ in
+            connection.cancel()
+        })
+        notifyCompletion(error: NSError(
+            domain: "app.openisland.llm-proxy",
+            code: -1001,
+            userInfo: [NSLocalizedDescriptionKey: "upstream first-byte timeout after \(timeout)s"]
+        ))
+        healthMonitor?.record(success: false)
+        return true
+    }
+
+    private func disarmFirstByteWatchdog() {
+        lock.lock()
+        let timer = firstByteWatchdog
+        firstByteWatchdog = nil
+        lock.unlock()
+        timer?.cancel()
+    }
+
     func handleResponseHead(_ resp: HTTPURLResponse) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            return
+        }
+        sentHeaders = true
+        let timer = firstByteWatchdog
+        firstByteWatchdog = nil
+        lock.unlock()
+        timer?.cancel()
+
         let status = resp.statusCode
         lastSeenStatus = status
         var headers: [(name: String, value: String)] = []
@@ -1087,7 +1262,6 @@ private final class ProxyTaskHandler: @unchecked Sendable {
             reasonPhrase: LLMProxyServer.reasonPhrase(for: status),
             headers: headers
         )
-        sentHeaders = true
         connection.send(content: headerData, completion: .contentProcessed { [logger] error in
             if let error {
                 logger.warning("send response headers failed: \(error.localizedDescription)")
@@ -1102,6 +1276,10 @@ private final class ProxyTaskHandler: @unchecked Sendable {
 
     func handleResponseChunk(_ data: Data) {
         guard !data.isEmpty else { return }
+        lock.lock()
+        let isCompleted = completed
+        lock.unlock()
+        guard !isCompleted else { return }
         connection.send(content: data, completion: .contentProcessed { [logger] error in
             if let error {
                 logger.debug("send response chunk failed: \(error.localizedDescription)")
@@ -1115,7 +1293,17 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     }
 
     func handleCompletion(error: (any Error)?) {
-        if let error, !sentHeaders {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let alreadySentHeaders = sentHeaders
+        lock.unlock()
+        disarmFirstByteWatchdog()
+
+        if let error, !alreadySentHeaders {
             // Upstream failed before any byte flowed — synthesize a 502 so
             // the agent sees a structured response instead of empty EOF.
             let body = #"{"error":"upstream connection failed: "# +
@@ -1147,11 +1335,7 @@ private final class ProxyTaskHandler: @unchecked Sendable {
                 connectionRef.cancel()
             }
         )
-        if let captured = observer {
-            let ctx = context
-            let err = error
-            Task { await captured.proxy(ctx, didCompleteWithError: err) }
-        }
+        notifyCompletion(error: error)
         // Health metric: success = no transport error AND a 2xx/3xx
         // upstream status. 4xx/5xx counts as failure (the user's
         // request did get to the upstream but the upstream told us
@@ -1164,6 +1348,14 @@ private final class ProxyTaskHandler: @unchecked Sendable {
                 return (200..<400).contains(status)
             }()
             monitor.record(success: ok)
+        }
+    }
+
+    private func notifyCompletion(error: (any Error)?) {
+        if let captured = observer {
+            let ctx = context
+            let err = error
+            Task { await captured.proxy(ctx, didCompleteWithError: err) }
         }
     }
 }

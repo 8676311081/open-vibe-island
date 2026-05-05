@@ -25,7 +25,8 @@ struct LLMProxyServerIntegrationTests {
     private static func makeServer(
         anthropicMock: URL = URL(string: "https://api.anthropic.com")!,
         openAIMock: URL = URL(string: "https://api.openai.com")!,
-        profileResolver: (any UpstreamProfileResolver)? = nil
+        profileResolver: (any UpstreamProfileResolver)? = nil,
+        upstreamFirstByteTimeout: TimeInterval = 30
     ) async throws -> (LLMProxyServer, LLMStatsStore, UInt16, URL) {
         let storeURL = makeTempStoreURL()
         let store = LLMStatsStore(url: storeURL)
@@ -33,7 +34,8 @@ struct LLMProxyServerIntegrationTests {
             configuration: LLMProxyConfiguration(
                 port: 0,
                 anthropicUpstream: anthropicMock,
-                openAIUpstream: openAIMock
+                openAIUpstream: openAIMock,
+                upstreamFirstByteTimeout: upstreamFirstByteTimeout
             ),
             additionalProtocolClasses: [MockUpstreamProtocol.self],
             profileResolver: profileResolver
@@ -685,6 +687,92 @@ struct LLMProxyServerIntegrationTests {
         #expect(bodyString.contains("claude-native"))
         #expect(!upstreamReached.didReach,
                 "upstream must NOT be reached when gate fires")
+        _ = store
+    }
+
+    // MARK: - (i) Forward watchdog prevents black-hole hangs
+
+    @Test
+    func fastUpstreamResponseCompletesBeforeFirstByteWatchdog() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer(
+            upstreamFirstByteTimeout: 0.5
+        )
+        defer { Self.teardown(server, storeURL) }
+
+        MockUpstreamProtocol.setResponder { _ in
+            MockUpstreamProtocol.Response(
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                bodyChunks: [Data(#"{"ok":true}"#.utf8)]
+            )
+        }
+
+        var req = URLRequest(url: Self.proxyURL(port: port, path: "/v1/messages?beta=true"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let http = try #require(response as? HTTPURLResponse)
+        #expect(http.statusCode == 200)
+        #expect(String(data: data, encoding: .utf8) == #"{"ok":true}"#)
+        _ = store
+    }
+
+    @Test
+    func slowFirstByteReturnsGatewayTimeoutWithoutStickingClient() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer(
+            upstreamFirstByteTimeout: 0.1
+        )
+        defer { Self.teardown(server, storeURL) }
+
+        MockUpstreamProtocol.setResponder { _ in
+            MockUpstreamProtocol.Response(
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                bodyChunks: [Data(#"{"late":true}"#.utf8)],
+                responseDelay: 1
+            )
+        }
+
+        var req = URLRequest(url: Self.proxyURL(port: port, path: "/v1/messages"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+
+        let start = Date()
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let elapsed = Date().timeIntervalSince(start)
+        let http = try #require(response as? HTTPURLResponse)
+        #expect(http.statusCode == 504)
+        #expect(elapsed < 1)
+        #expect(String(data: data, encoding: .utf8)?.contains("first-byte timeout") == true)
+        _ = store
+    }
+
+    @Test
+    func neverRespondingUpstreamReturnsGatewayTimeoutWithoutStickingClient() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer(
+            upstreamFirstByteTimeout: 0.1
+        )
+        defer { Self.teardown(server, storeURL) }
+
+        MockUpstreamProtocol.setResponder { _ in
+            MockUpstreamProtocol.Response(neverResponds: true)
+        }
+
+        var req = URLRequest(url: Self.proxyURL(port: port, path: "/v1/messages"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+
+        let start = Date()
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let elapsed = Date().timeIntervalSince(start)
+        let http = try #require(response as? HTTPURLResponse)
+        #expect(http.statusCode == 504)
+        #expect(elapsed < 1)
+        #expect(String(data: data, encoding: .utf8)?.contains("first-byte timeout") == true)
         _ = store
     }
 

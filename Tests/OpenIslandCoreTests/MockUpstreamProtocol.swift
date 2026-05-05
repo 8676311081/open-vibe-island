@@ -22,6 +22,14 @@ final class MockUpstreamProtocol: URLProtocol {
         /// Optional inter-chunk delay in seconds. Default 0 (deliver
         /// all chunks synchronously inside `startLoading`).
         var chunkDelay: TimeInterval = 0
+        /// Optional delay before response headers are delivered.
+        /// Lets tests simulate a task that has started but never gets
+        /// to URLSession's first-byte delegate callback.
+        var responseDelay: TimeInterval = 0
+        /// If true, `startLoading` returns without calling any client
+        /// callback. Used to model CFNetwork stalls before an outbound
+        /// socket exists.
+        var neverResponds: Bool = false
         /// Optional terminal error (e.g. simulated network drop).
         /// Mutually exclusive with body chunks: if set, no
         /// `urlProtocolDidFinishLoading` is invoked.
@@ -67,6 +75,10 @@ final class MockUpstreamProtocol: URLProtocol {
         }
         let response = responder(request)
 
+        if response.neverResponds {
+            return
+        }
+
         guard let httpResp = HTTPURLResponse(
             url: request.url!,
             statusCode: response.statusCode,
@@ -83,8 +95,22 @@ final class MockUpstreamProtocol: URLProtocol {
             )
             return
         }
-        client?.urlProtocol(self, didReceive: httpResp, cacheStoragePolicy: .notAllowed)
 
+        if response.responseDelay > 0 {
+            let client = self.client
+            let proto = self
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + response.responseDelay) {
+                client?.urlProtocol(proto, didReceive: httpResp, cacheStoragePolicy: .notAllowed)
+                proto.deliver(response)
+            }
+            return
+        }
+
+        client?.urlProtocol(self, didReceive: httpResp, cacheStoragePolicy: .notAllowed)
+        deliver(response)
+    }
+
+    private func deliver(_ response: Response) {
         if response.chunkDelay <= 0 {
             for chunk in response.bodyChunks {
                 client?.urlProtocol(self, didLoad: chunk)
