@@ -79,6 +79,13 @@ public final class CursorHookInstallationManager: @unchecked Sendable {
         let hooksURL = cursorDirectory.appendingPathComponent("hooks.json")
         let manifestURL = cursorDirectory.appendingPathComponent(CursorHookInstallerManifest.fileName)
         let existingHooks = try? Data(contentsOf: hooksURL)
+        // H-5: see HookConfigOwnership for rationale.
+        HookConfigOwnership.describeExistingConfig(
+            provider: .cursor,
+            configURL: hooksURL,
+            existingData: existingHooks,
+            managedCommandSubstring: "OpenIslandHooks"
+        )
         let installedBinaryURL = try ManagedHooksBinary.install(
             from: hooksBinaryURL,
             to: managedHooksBinaryURL,

@@ -96,6 +96,15 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
 
         let existingConfig = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
         let existingHooks = try? Data(contentsOf: hooksURL)
+        // H-5: classify existing config so a later
+        // `log show --predicate 'subsystem == "app.openisland"'`
+        // shows what user-authored hooks we observed and preserved.
+        HookConfigOwnership.describeExistingConfig(
+            provider: .codex,
+            configURL: hooksURL,
+            existingData: existingHooks,
+            managedCommandSubstring: "OpenIslandHooks"
+        )
         let installedHooksBinaryURL = try ManagedHooksBinary.install(
             from: hooksBinaryURL,
             to: managedHooksBinaryURL,

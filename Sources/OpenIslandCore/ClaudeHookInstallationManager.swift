@@ -75,6 +75,14 @@ public final class ClaudeHookInstallationManager: @unchecked Sendable {
     public func install(hooksBinaryURL: URL) throws -> ClaudeHookInstallationStatus {
         let manifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.fileName)
         let legacyManifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.legacyFileName)
+        // H-5: see HookConfigOwnership for rationale.
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        HookConfigOwnership.describeExistingConfig(
+            provider: .claude,
+            configURL: settingsURL,
+            existingData: try? Data(contentsOf: settingsURL),
+            managedCommandSubstring: "OpenIslandHooks"
+        )
         let installedHooksBinaryURL = try ManagedHooksBinary.install(
             from: hooksBinaryURL,
             to: managedHooksBinaryURL,

@@ -78,6 +78,13 @@ public final class GeminiHookInstallationManager: @unchecked Sendable {
         let settingsURL = geminiDirectory.appendingPathComponent("settings.json")
         let manifestURL = geminiDirectory.appendingPathComponent(GeminiHookInstallerManifest.fileName)
         let existingSettings = try? Data(contentsOf: settingsURL)
+        // H-5: see HookConfigOwnership for rationale.
+        HookConfigOwnership.describeExistingConfig(
+            provider: .gemini,
+            configURL: settingsURL,
+            existingData: existingSettings,
+            managedCommandSubstring: "OpenIslandHooks"
+        )
         let installedBinaryURL = try ManagedHooksBinary.install(
             from: hooksBinaryURL,
             to: managedHooksBinaryURL,
