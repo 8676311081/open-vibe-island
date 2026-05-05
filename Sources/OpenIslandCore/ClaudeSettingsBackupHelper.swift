@@ -257,54 +257,30 @@ public enum ClaudeSettingsBackupHelper {
     }
 
     /// Wrap `body` in an exclusive flock(2) advisory lock on
-    /// `<directory>/settings.json.lock`. The lock file is created on
-    /// first use and deliberately left on disk after release — flock
-    /// is fd-scoped, so file persistence is harmless and lets concurrent
-    /// processes share the same inode without coordination tricks.
-    ///
-    /// flock has no native blocking-with-timeout, so we poll
-    /// `LOCK_EX | LOCK_NB` with a 50 ms `usleep` backoff until the
-    /// deadline. Throws `.lockContention` on timeout, `.lockSystemError`
-    /// on other failures.
-    ///
-    /// `usleep` (not `Task.sleep`) because the public API is sync to
-    /// preserve the existing 6 caller sites unchanged. If a future async
-    /// caller needs cooperative-scheduler friendliness, add an `async`
-    /// overload that internally uses `Task.sleep`; the current 50 ms
-    /// backoff in a contention-rare path is acceptable.
-    ///
-    /// `defer` order matters: `close(fd)` is registered FIRST so that
-    /// LIFO unwinding runs `flock(_, LOCK_UN)` first and `close(fd)`
-    /// second. Reversing the order would close the fd while the lock
-    /// is still nominally held; on macOS the kernel auto-releases on
-    /// close, but the explicit unlock-then-close sequence is the
-    /// behavior tools / debuggers expect.
+    /// `<directory>/settings.json.lock`. Delegates to
+    /// `SettingsFileLock.withLock` (the shared cross-process locking
+    /// primitive); locally maps that helper's errors to this enum
+    /// for API stability with existing call sites.
     static func withSettingsLock<T>(
         directory: URL,
         timeout: TimeInterval,
         _ body: () throws -> T
     ) throws -> T {
-        let lockPath = lockURL(directory: directory).path
-        let fd = lockPath.withCString { open($0, O_CREAT | O_RDWR, 0o644) }
-        guard fd >= 0 else {
-            throw ClaudeSettingsBackupError.lockSystemError(errno: errno)
-        }
-        defer { close(fd) }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            let err = errno
-            if err != EWOULDBLOCK {
-                throw ClaudeSettingsBackupError.lockSystemError(errno: err)
+        do {
+            return try SettingsFileLock.withLock(
+                at: lockURL(directory: directory),
+                timeout: timeout
+            ) {
+                try body()
             }
-            if Date() >= deadline {
+        } catch let error as SettingsFileLockError {
+            switch error {
+            case .lockContention:
                 throw ClaudeSettingsBackupError.lockContention
+            case let .lockSystemError(_, errnoValue):
+                throw ClaudeSettingsBackupError.lockSystemError(errno: errnoValue)
             }
-            usleep(50_000)
         }
-        defer { _ = flock(fd, LOCK_UN) }
-
-        return try body()
     }
 
     @discardableResult

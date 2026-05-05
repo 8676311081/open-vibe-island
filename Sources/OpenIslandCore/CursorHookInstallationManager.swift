@@ -66,7 +66,16 @@ public final class CursorHookInstallationManager: @unchecked Sendable {
     @discardableResult
     public func install(hooksBinaryURL: URL) throws -> CursorHookInstallationStatus {
         try fileManager.createDirectory(at: cursorDirectory, withIntermediateDirectories: true)
+        // H-6: cross-process serialization. See CodexHookInstallationManager.
+        return try SettingsFileLock.withLock(
+            at: cursorDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.installLocked(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
 
+    private func installLocked(hooksBinaryURL: URL) throws -> CursorHookInstallationStatus {
         let hooksURL = cursorDirectory.appendingPathComponent("hooks.json")
         let manifestURL = cursorDirectory.appendingPathComponent(CursorHookInstallerManifest.fileName)
         let existingHooks = try? Data(contentsOf: hooksURL)
@@ -100,6 +109,15 @@ public final class CursorHookInstallationManager: @unchecked Sendable {
 
     @discardableResult
     public func uninstall() throws -> CursorHookInstallationStatus {
+        return try SettingsFileLock.withLock(
+            at: cursorDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.uninstallLocked()
+        }
+    }
+
+    private func uninstallLocked() throws -> CursorHookInstallationStatus {
         let hooksURL = cursorDirectory.appendingPathComponent("hooks.json")
         let manifestURL = cursorDirectory.appendingPathComponent(CursorHookInstallerManifest.fileName)
         let manifest = try loadManifest(at: manifestURL)

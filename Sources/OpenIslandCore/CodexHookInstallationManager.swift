@@ -76,7 +76,19 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
     @discardableResult
     public func install(hooksBinaryURL: URL) throws -> CodexHookInstallationStatus {
         try fileManager.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        // H-6: serialize concurrent install/uninstall flows (two
+        // OpenIsland instances racing, or OpenIsland racing the
+        // user's editor). flock the install directory so we can't
+        // interleave with another writer mid-mutation.
+        return try SettingsFileLock.withLock(
+            at: codexDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.installLocked(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
 
+    private func installLocked(hooksBinaryURL: URL) throws -> CodexHookInstallationStatus {
         let configURL = codexDirectory.appendingPathComponent("config.toml")
         let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
         let manifestURL = codexDirectory.appendingPathComponent(CodexHookInstallerManifest.fileName)
@@ -123,6 +135,17 @@ public final class CodexHookInstallationManager: @unchecked Sendable {
 
     @discardableResult
     public func uninstall() throws -> CodexHookInstallationStatus {
+        // H-6: same lock-file as install path so install/uninstall
+        // are mutually exclusive, not just install/install.
+        return try SettingsFileLock.withLock(
+            at: codexDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.uninstallLocked()
+        }
+    }
+
+    private func uninstallLocked() throws -> CodexHookInstallationStatus {
         let configURL = codexDirectory.appendingPathComponent("config.toml")
         let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
         let manifestURL = resolvedManifestURL()

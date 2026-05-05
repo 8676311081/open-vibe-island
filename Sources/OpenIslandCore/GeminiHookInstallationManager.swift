@@ -65,7 +65,16 @@ public final class GeminiHookInstallationManager: @unchecked Sendable {
     @discardableResult
     public func install(hooksBinaryURL: URL) throws -> GeminiHookInstallationStatus {
         try fileManager.createDirectory(at: geminiDirectory, withIntermediateDirectories: true)
+        // H-6: cross-process serialization. See CodexHookInstallationManager.
+        return try SettingsFileLock.withLock(
+            at: geminiDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.installLocked(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
 
+    private func installLocked(hooksBinaryURL: URL) throws -> GeminiHookInstallationStatus {
         let settingsURL = geminiDirectory.appendingPathComponent("settings.json")
         let manifestURL = geminiDirectory.appendingPathComponent(GeminiHookInstallerManifest.fileName)
         let existingSettings = try? Data(contentsOf: settingsURL)
@@ -99,6 +108,15 @@ public final class GeminiHookInstallationManager: @unchecked Sendable {
 
     @discardableResult
     public func uninstall() throws -> GeminiHookInstallationStatus {
+        return try SettingsFileLock.withLock(
+            at: geminiDirectory.appendingPathComponent("install.lock"),
+            fileManager: fileManager
+        ) {
+            try self.uninstallLocked()
+        }
+    }
+
+    private func uninstallLocked() throws -> GeminiHookInstallationStatus {
         let settingsURL = geminiDirectory.appendingPathComponent("settings.json")
         let manifestURL = geminiDirectory.appendingPathComponent(GeminiHookInstallerManifest.fileName)
         let manifest = try loadManifest(at: manifestURL)
