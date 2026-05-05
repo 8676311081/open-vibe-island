@@ -48,9 +48,46 @@ fi
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Helpers" "$bundle_dir/Contents/Resources" "$bundle_dir/Contents/Frameworks"
 
 # Kill any running instance before copying so the binary isn't locked.
+#
+# Why this is more elaborate than `pkill -9 -f "Open Island Dev"`:
+# `pkill -f` matches the full command line, but the running binary's
+# argv[0] is `OpenIslandApp` (not "Open Island Dev"). The path
+# happens to contain "Open Island Dev" so the original pattern often
+# matched — but not always: previous starts where pkill returned 0
+# but the process was still alive 2 s later have been observed,
+# leading to the new launch silently inheriting a stale process and
+# producing puzzling "code didn't update" symptoms. Match by binary
+# path AND poll until the process really has exited.
 osascript -e 'tell application "Open Island Dev" to quit' 2>/dev/null || true
+pkill -9 -f "OpenIslandApp" 2>/dev/null || true
 pkill -9 -f "Open Island Dev" 2>/dev/null || true
-sleep 2
+
+# Poll until no live (non-zombie) process remains, up to 10 s.
+# `ps -ax -o pid,stat,command` filters out 'Z' (zombie) and
+# 'UE'/'UNE' (stuck-uninterruptible) entries so we don't loop on
+# kernel-state remnants that we cannot clear without a reboot.
+for _ in $(seq 1 50); do
+  live_pids=$(ps -ax -o pid,stat,command \
+    | awk '$3 ~ /OpenIslandApp$/ && $2 !~ /^(Z|U)/ { print $1 }' \
+    | head -10)
+  if [ -z "$live_pids" ]; then
+    break
+  fi
+  echo "$live_pids" | xargs -r kill -9 2>/dev/null
+  sleep 0.2
+done
+
+# Final assertion: bail loudly if a live process is still around —
+# silent overwrite of a locked binary is a worse failure than
+# erroring out.
+remaining=$(ps -ax -o pid,stat,command \
+  | awk '$3 ~ /OpenIslandApp$/ && $2 !~ /^(Z|U)/ { print $1 }' \
+  | head -5)
+if [ -n "$remaining" ]; then
+  echo "❌ Unable to terminate running OpenIslandApp processes: $remaining" >&2
+  echo "   Reboot or manually kill these PIDs, then retry." >&2
+  exit 1
+fi
 
 command cp "$app_binary" "$bundle_binary"
 command cp "$hooks_binary" "$bundle_dir/Contents/Helpers/OpenIslandHooks"
