@@ -160,10 +160,10 @@ struct LLMDayBucketModelTrackingTests {
     }
 
     private static func todayKey() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")!
-        return f.string(from: Date())
+        // Mirror what LLMStatsStore.dayKey writes — local timezone,
+        // not UTC. The store keys buckets by the user's wall-clock
+        // calendar day; using a UTC formatter here made this suite
+        // intermittently fail at the local-vs-UTC date boundary.
+        LLMStatsStore.dayKey(for: Date())
     }
 }
