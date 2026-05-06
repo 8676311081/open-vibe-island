@@ -5,14 +5,25 @@
 # Usage:
 #   claude-3 [args...]
 #       Routes through the proxy using the GUI-active profile.
+#       Picks port 9710/9711/9712 to match that profile's
+#       ProviderGroup so the per-port routing policy admits the
+#       request (post three-port split — see ProviderGroup.swift).
 #   OI_PROFILE=<id> claude-3 [args...]
 #       Routes through the proxy and overrides the profile for THIS
 #       invocation only — does not change the GUI-active profile, so
 #       another terminal's claude-3 keeps using whatever it was on.
 #
 # Environment:
-#   OPEN_ISLAND_PORT  proxy port (default 9710)
-#   OI_PROFILE        per-invocation profile override id (e.g.
+#   OPEN_ISLAND_PORT  Override the auto-selected loopback port. If
+#                     unset, the shim asks `oi-current-active-group`
+#                     and dispatches to:
+#                         officialClaude  → 9710
+#                         deepseek        → 9711
+#                         thirdParty      → 9712
+#                     Set this when debugging or when you want to
+#                     force a particular listener regardless of the
+#                     GUI-active profile.
+#   OI_PROFILE        Per-invocation profile override id (e.g.
 #                     "deepseek-v4-pro", "anthropic-native", or any
 #                     custom profile id from the routing pane). When
 #                     set, the shim encodes the id into the URL as
@@ -20,6 +31,16 @@
 #                     request entry, looks up the profile, and uses
 #                     it just for this request. Unknown ids return
 #                     400 with an `available` list at the proxy edge.
+#                     Note: with three-port enforcement, the override
+#                     id's group must match the listener's group;
+#                     pick a port that fits via OPEN_ISLAND_PORT.
+#
+# Exported to children:
+#   OPEN_ISLAND_PROVIDER_GROUP  ProviderGroup tag for this session.
+#                               PreToolUse hooks (RTK, etc.) read
+#                               this to attribute their work to the
+#                               correct group instead of guessing
+#                               from base URL.
 #
 # Pairs with:
 #   claude         — official binary, OAuth direct connect (do not
@@ -31,8 +52,28 @@
 #   oi-claude      — legacy alias for proxy routing without the
 #                    OI_PROFILE override knob; will deprecate after
 #                    one release in favor of claude-3.
+#   oi-current-active-group
+#                  — helper this shim invokes to discover the
+#                    GUI-active group; can be called manually when
+#                    scripting.
 
-: "${OPEN_ISLAND_PORT:=9710}"
+# Resolve provider group + port. The helper lives in the same
+# directory as this shim (~/.open-island/bin/) after install.
+shim_dir="${0:A:h}"
+group_helper="${shim_dir}/oi-current-active-group"
+if [ -x "$group_helper" ]; then
+    group=$("$group_helper" 2>/dev/null) || group="officialClaude"
+else
+    group=$(oi-current-active-group 2>/dev/null) || group="officialClaude"
+fi
+
+case "$group" in
+    deepseek)       group_port=9711 ;;
+    thirdParty)     group_port=9712 ;;
+    officialClaude) group_port=9710 ;;
+    *)              group_port=9710 ;;  # defensive
+esac
+: "${OPEN_ISLAND_PORT:=$group_port}"
 
 if [ -n "${OI_PROFILE:-}" ]; then
     base="http://127.0.0.1:${OPEN_ISLAND_PORT}/_oi/profile/${OI_PROFILE}"
@@ -40,4 +81,7 @@ else
     base="http://127.0.0.1:${OPEN_ISLAND_PORT}"
 fi
 
-exec env ANTHROPIC_BASE_URL="${base}" claude "$@"
+exec env \
+    ANTHROPIC_BASE_URL="${base}" \
+    OPEN_ISLAND_PROVIDER_GROUP="${group}" \
+    claude "$@"

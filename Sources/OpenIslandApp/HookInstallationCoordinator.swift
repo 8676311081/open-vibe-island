@@ -462,6 +462,7 @@ final class HookInstallationCoordinator {
         "oi-claude",
         "claude-3",
         "claude-deep",
+        "oi-current-active-group",
     ]
 
     /// Copy bundled CLI shims to `~/.open-island/bin/`. Idempotent:

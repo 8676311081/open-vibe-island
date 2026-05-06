@@ -1,0 +1,61 @@
+#!/bin/zsh
+# Output the ProviderGroup tag for the currently-active Open Island
+# routing profile. Used by claude-3, claude-deep, oi-claude shims to
+# pick the right loopback port (9710 / 9711 / 9712).
+#
+# Usage:
+#   oi-current-active-group
+#
+# Stdout (one of):
+#   officialClaude
+#   deepseek
+#   thirdParty
+#
+# Stderr:
+#   warning when Open Island state is unreadable; falls back to
+#   `officialClaude` (most conservative choice — preserves the
+#   pre-three-port behavior of writing to 9710).
+#
+# Exit code: always 0 (the shim must always get a usable answer
+# even if Open Island isn't running yet).
+#
+# Group inference rules MUST mirror Swift's
+# `ProviderGroup.infer(profile:)`. Note this script can only
+# read the active profile id from UserDefaults — it cannot tell
+# a custom profile named "deepseek-..." apart from the builtin
+# without consulting the actual profile list. We keep the rule
+# tight: only the literal builtin ids land in `deepseek`; all
+# other "deepseek-*" ids fall through to thirdParty, exactly
+# matching the Swift `ProviderGroup.infer` behavior for
+# `isCustom == true` profiles.
+
+set -e
+set -u
+
+active_id=""
+if active_id=$(defaults read app.openisland.dev OpenIsland.LLMProxy.activeProfileId 2>/dev/null); then
+    : # got it
+else
+    print -u2 "[oi-current-active-group] Open Island not running or state unreadable; defaulting to officialClaude"
+    print "officialClaude"
+    exit 0
+fi
+
+case "$active_id" in
+    anthropic-native)
+        print "officialClaude"
+        ;;
+    deepseek-v4-pro|deepseek-v4-flash)
+        # Builtin DeepSeek profiles only. A custom profile happening
+        # to use one of these ids is impossible (the store rejects
+        # `idCollidesWithBuiltin`), so this is unambiguous.
+        print "deepseek"
+        ;;
+    *)
+        # Anything else — custom profiles regardless of host or
+        # name, future builtins we haven't taught this script
+        # about — goes to thirdParty. This matches Swift's
+        # default branch in `ProviderGroup.infer`.
+        print "thirdParty"
+        ;;
+esac

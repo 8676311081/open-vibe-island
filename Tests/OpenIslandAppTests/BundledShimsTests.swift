@@ -35,12 +35,18 @@ struct BundledShimsTests {
 
     @Test
     func bundleShipsAllExpectedShims() throws {
-        // Four shims must be in the bundle so the install loop in
+        // Five shims must be in the bundle so the install loop in
         // `ensureShimsInstalled` finds them. Adding a new shim later
         // means extending the source-of-truth list in
         // HookInstallationCoordinator.bundledShimNames AND adding a
         // per-content test below.
-        let expected = ["claude-native", "oi-claude", "claude-3", "claude-deep"]
+        let expected = [
+            "claude-native",
+            "oi-claude",
+            "claude-3",
+            "claude-deep",
+            "oi-current-active-group",
+        ]
         for name in expected {
             let content = try Self.shimContent(name)
             #expect(content.hasPrefix("#!/bin/zsh"), "\(name) should be a zsh shim")
@@ -95,8 +101,11 @@ struct BundledShimsTests {
         // Both shims point at 127.0.0.1:${OPEN_ISLAND_PORT}.
         #expect(content.contains("127.0.0.1:${OPEN_ISLAND_PORT}"))
         // The shim ultimately exec's claude with ANTHROPIC_BASE_URL
-        // set — same exec line shape as the other shims.
-        #expect(content.contains("exec env ANTHROPIC_BASE_URL="))
+        // set — same exec line shape as the other shims. Multi-line
+        // continuation form (`exec env \\` then env-var assignments)
+        // is the canonical post three-port shape.
+        #expect(content.contains("exec env"))
+        #expect(content.contains("ANTHROPIC_BASE_URL="))
         #expect(content.contains("claude \"$@\""))
     }
 
@@ -123,23 +132,62 @@ struct BundledShimsTests {
     }
 
     @Test
-    func claudeDeepShimEmitsFamilySentinelWhenOIProfileUnset() throws {
-        // claude-deep's default branch must emit the
-        // `/_oi/family/deepseek` URL prefix that the proxy's
-        // `parseFamilySentinel(path:)` recognizes. Anything else
-        // would silently degrade to oi-claude / claude-3 behavior
-        // (no family enforcement) and defeat the whole point of
-        // having a separate `claude-deep` command.
+    func claudeDeepShimDispatchesToPort9711() throws {
+        // Post three-port split, claude-deep no longer emits the
+        // legacy `/_oi/family/deepseek` URL sentinel — the listener
+        // on 9711 IS the DeepSeek family. The shim's job is now to
+        // pin OPEN_ISLAND_PORT at 9711 by default and let the
+        // listener policy do the enforcement (it returns 421 if the
+        // GUI-active profile is not a deepseek builtin).
         let content = try Self.shimContent("claude-deep")
-        #expect(content.contains("/_oi/family/deepseek"),
-                "claude-deep must encode the deepseek family constraint into a /_oi/family/deepseek URL prefix")
-        // Verify the OI_PROFILE check guards the family branch — the
-        // shim should fall into the family branch when OI_PROFILE is
-        // unset, and into the per-id override branch when it is set.
+        #expect(
+            content.contains(": \"${OPEN_ISLAND_PORT:=9711}\""),
+            "claude-deep must default OPEN_ISLAND_PORT to 9711"
+        )
+        // Legacy `/_oi/family/deepseek` sentinel must be gone — the
+        // listener-policy enforcement supersedes it.
+        #expect(!content.contains("/_oi/family/deepseek"),
+                "claude-deep should not emit the legacy /_oi/family/deepseek sentinel")
+        // Verify the OI_PROFILE check guards the override branch.
         #expect(
             content.contains("\"${OI_PROFILE:-}\"") || content.contains("\"$OI_PROFILE\""),
-            "claude-deep must check OI_PROFILE before deciding which sentinel to emit"
+            "claude-deep must check OI_PROFILE before deciding which URL to emit"
         )
+    }
+
+    @Test
+    func claude3ShimDispatchesByActiveProviderGroup() throws {
+        // claude-3 must consult the GUI-active profile's
+        // ProviderGroup and pick the matching loopback port. Three
+        // hard requirements:
+        //  - calls `oi-current-active-group` helper
+        //  - maps deepseek → 9711, thirdParty → 9712, default 9710
+        //  - exports OPEN_ISLAND_PROVIDER_GROUP for downstream hooks
+        let content = try Self.shimContent("claude-3")
+        #expect(content.contains("oi-current-active-group"),
+                "claude-3 must invoke the active-group helper")
+        #expect(content.contains("9711"), "claude-3 must know about the deepseek port")
+        #expect(content.contains("9712"), "claude-3 must know about the thirdParty port")
+        #expect(content.contains("9710"), "claude-3 must know about the officialClaude port")
+        #expect(content.contains("OPEN_ISLAND_PROVIDER_GROUP="),
+                "claude-3 must export OPEN_ISLAND_PROVIDER_GROUP")
+    }
+
+    @Test
+    func currentActiveGroupHelperOutputsRecognizedTags() throws {
+        // The helper must only emit one of the three ProviderGroup
+        // raw values. shim consumers depend on this exact set.
+        let content = try Self.shimContent("oi-current-active-group")
+        #expect(content.contains("officialClaude"))
+        #expect(content.contains("deepseek"))
+        #expect(content.contains("thirdParty"))
+        // Helper reads UserDefaults via `defaults`. If this changes
+        // we need to re-evaluate whether we're picking up the right
+        // app domain (app.openisland.dev).
+        #expect(content.contains("defaults read app.openisland.dev"),
+                "helper must read OpenIsland's UserDefaults domain")
+        #expect(content.contains("OpenIsland.LLMProxy.activeProfileId"),
+                "helper must read the canonical active-profile-id key")
     }
 
     @Test
@@ -156,13 +204,14 @@ struct BundledShimsTests {
 
     @Test
     func claudeDeepShimUsesProxyAndExecsClaude() throws {
-        // Smoke that the shim reaches `exec env ANTHROPIC_BASE_URL=…
-        // claude "$@"` shape used by the other proxy shims. Catches
-        // refactors that accidentally invoke a different binary or
-        // forget to thread args.
+        // Smoke that the shim reaches `exec env … claude "$@"` shape
+        // used by the other proxy shims. Catches refactors that
+        // accidentally invoke a different binary or forget to thread
+        // args.
         let content = try Self.shimContent("claude-deep")
         #expect(content.contains("127.0.0.1:${OPEN_ISLAND_PORT}"))
-        #expect(content.contains("exec env ANTHROPIC_BASE_URL="))
+        #expect(content.contains("exec env"))
+        #expect(content.contains("ANTHROPIC_BASE_URL="))
         #expect(content.contains("claude \"$@\""))
     }
 }

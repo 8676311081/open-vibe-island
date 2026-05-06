@@ -1,45 +1,54 @@
 #!/bin/zsh
-# Claude Code routed through Open Island proxy, locked to the
-# DeepSeek family. The active GUI profile must have an id starting
-# with `deepseek-` (e.g. `deepseek-v4-pro`, `deepseek-v4-flash`,
-# or a custom `deepseek-*` profile). If the active card is BuerAI /
-# Anthropic / anything else, the proxy returns a 400 explaining the
-# mismatch — `claude-deep` is intentionally narrower than `claude-3`.
+# Claude Code routed through Open Island's DeepSeek-only listener
+# (port 9711, ProviderGroup.deepseek). The 9711 listener admits
+# only profiles whose id is `deepseek-v4-pro` / `deepseek-v4-flash`
+# (the builtin DeepSeek profiles). Anything else gets 421 from
+# the listener — `claude-deep` is intentionally narrower than
+# `claude-3`, which auto-picks the port for whatever group the
+# GUI-active profile belongs to.
 #
 # Usage:
 #   claude-deep [args...]
-#       Routes through the proxy. The proxy enforces that whatever
-#       deepseek-* card is GUI-active is the one that handles the
-#       request.
+#       Connects to 9711. The proxy serves the GUI-active profile
+#       iff it's a DeepSeek builtin; otherwise replies 421 with
+#       a structured "active profile is in <group>, switch via
+#       Settings → Model Routing or use claude-3" body.
 #   OI_PROFILE=<id> claude-deep [args...]
-#       Per-invocation profile override; identical to `OI_PROFILE`
-#       on `claude-3`. The override id can be any registered profile
-#       (not just deepseek-*) — when set, it wins and the family
-#       constraint does not apply.
+#       Per-invocation profile override. The 9711 listener still
+#       enforces group: pass a deepseek-* builtin id, otherwise
+#       you'll get 421 (use claude-3 with OI_PROFILE for cross-
+#       group overrides).
 #
 # Environment:
-#   OPEN_ISLAND_PORT  proxy port (default 9710)
-#   OI_PROFILE        per-invocation profile override id. When set,
-#                     same path as claude-3's override knob — the
-#                     family lock is bypassed for that one call.
-#                     Documented as an advanced escape hatch; most
-#                     users should leave it unset and rely on the
-#                     family enforcement.
+#   OPEN_ISLAND_PORT          Override the loopback port. Defaults
+#                             to 9711 (the DeepSeek listener).
+#   OI_PROFILE                Per-invocation profile override id.
+#
+# Exported to children:
+#   OPEN_ISLAND_PROVIDER_GROUP=deepseek
+#                             Always set on this shim. PreToolUse
+#                             hooks (RTK, etc.) attribute work
+#                             via this env.
 #
 # Pairs with:
 #   claude         — official binary, OAuth direct connect (do not
 #                    touch — Anthropic Max/Pro client identity check
 #                    fails through any proxy).
-#   claude-3       — proxy routing for any GUI-active profile, no
-#                    family constraint.
+#   claude-3       — proxy routing that auto-picks the port matching
+#                    the GUI-active profile's group.
 #   claude-native  — explicitly bypass the proxy for ambient OAuth.
 
-: "${OPEN_ISLAND_PORT:=9710}"
+: "${OPEN_ISLAND_PORT:=9711}"
 
 if [ -n "${OI_PROFILE:-}" ]; then
     base="http://127.0.0.1:${OPEN_ISLAND_PORT}/_oi/profile/${OI_PROFILE}"
 else
-    base="http://127.0.0.1:${OPEN_ISLAND_PORT}/_oi/family/deepseek"
+    # No more `_oi/family/deepseek` sentinel — the listener IS the
+    # DeepSeek family now. Plain base URL is enough.
+    base="http://127.0.0.1:${OPEN_ISLAND_PORT}"
 fi
 
-exec env ANTHROPIC_BASE_URL="${base}" claude "$@"
+exec env \
+    ANTHROPIC_BASE_URL="${base}" \
+    OPEN_ISLAND_PROVIDER_GROUP="deepseek" \
+    claude "$@"

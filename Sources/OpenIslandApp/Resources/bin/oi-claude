@@ -2,10 +2,35 @@
 # Claude Code routed through Open Island proxy.
 # Usage: oi-claude [args...]
 #
-# Sets ANTHROPIC_BASE_URL to the local Open Island proxy so all requests
-# go through the model-routing layer (cost tracking, profile switching).
+# Auto-selects the loopback port (9710/9711/9712) matching the
+# GUI-active profile's ProviderGroup, then exports the resolved
+# group as OPEN_ISLAND_PROVIDER_GROUP for downstream hooks.
+#
+# Legacy alias: prefer `claude-3` for new scripts. `oi-claude` is
+# kept around for users whose existing wrappers reference this name.
+#
 # Environment:
-#   OPEN_ISLAND_PORT  — proxy port (default 9710)
+#   OPEN_ISLAND_PORT  Override the auto-selected loopback port.
+#                     Default is whichever port the GUI-active
+#                     profile's group binds.
 
-: "${OPEN_ISLAND_PORT:=9710}"
-exec env ANTHROPIC_BASE_URL="http://127.0.0.1:${OPEN_ISLAND_PORT}" claude "$@"
+shim_dir="${0:A:h}"
+group_helper="${shim_dir}/oi-current-active-group"
+if [ -x "$group_helper" ]; then
+    group=$("$group_helper" 2>/dev/null) || group="officialClaude"
+else
+    group=$(oi-current-active-group 2>/dev/null) || group="officialClaude"
+fi
+
+case "$group" in
+    deepseek)       group_port=9711 ;;
+    thirdParty)     group_port=9712 ;;
+    officialClaude) group_port=9710 ;;
+    *)              group_port=9710 ;;
+esac
+: "${OPEN_ISLAND_PORT:=$group_port}"
+
+exec env \
+    ANTHROPIC_BASE_URL="http://127.0.0.1:${OPEN_ISLAND_PORT}" \
+    OPEN_ISLAND_PROVIDER_GROUP="${group}" \
+    claude "$@"
