@@ -3,9 +3,16 @@ import OpenIslandCore
 import os
 
 /// Owns the lifecycle of `LLMProxyServer` from the app side, plus the
-/// stats store + usage observer that live alongside it. Kept tiny on
-/// purpose — server, store, and observer are all in Core, the UI
-/// surfaces are in Views, this is just the wire between them.
+/// stats store + usage observer that live alongside it.
+///
+/// **Three-port routing.** Each `ProviderGroup` gets its own
+/// listener (9710/9711/9712) and its own `LLMUpstreamHealthMonitor`,
+/// but all three share a single `RouterCredentialsStore`,
+/// `UpstreamProfileStore`, `LLMStatsStore`, and `LLMUsageObserver`.
+/// The shared stores keep credential / active-profile state
+/// coherent across listeners; the per-group monitors keep upstream
+/// degradation in one provider from polluting another's health
+/// banner.
 @MainActor
 final class LLMProxyCoordinator {
     private static let logger = Logger(subsystem: "app.openisland", category: "LLMProxyCoordinator")
@@ -16,41 +23,78 @@ final class LLMProxyCoordinator {
     static let defaultOpenAIUpstream = "https://api.openai.com"
     static let defaultAnthropicUpstream = "https://api.anthropic.com"
 
-    private var server: LLMProxyServer
+    /// One server-and-monitor pair per provider group. Built fresh
+    /// in `init` and on every `rebuildServers()` (port/upstream
+    /// edit). Iteration order is stable via `ProviderGroup.allCases`
+    /// — log lines and lifecycle order match the official-Claude →
+    /// deepseek → thirdParty visual order in the routing pane.
+    private struct GroupListener {
+        let server: LLMProxyServer
+        let healthMonitor: LLMUpstreamHealthMonitor
+    }
+    private var listenersByGroup: [ProviderGroup: GroupListener]
+    /// Defensive fallback returned by `healthMonitor` if a caller
+    /// reads it before `init` has populated `listenersByGroup`.
+    /// Should never be observed in practice since init is sync.
+    private let fallbackHealthMonitor = LLMUpstreamHealthMonitor()
+
     let statsStore: LLMStatsStore
     let usageObserver: LLMUsageObserver
-    /// Keychain-backed credential store for non-Anthropic upstreams.
-    /// Lives at the coordinator (not on each rebuilt server) so the
-    /// underlying Keychain handle survives `rebuildServer()` and
-    /// stays consistent across upstream URL changes.
+    /// Keychain-backed credential store, shared across all three
+    /// listeners. Lives at the coordinator (not per-server) so a
+    /// `rebuildServers()` doesn't churn the Keychain handle.
     let credentialsStore: RouterCredentialsStore
-    /// Routing-table resolver, paired with `credentialsStore`. Single
-    /// owner per coordinator so active-profile state and custom-
-    /// profile mutations don't get reset on `rebuildServer()`.
+    /// Routing-table resolver, also shared. The store's lock makes
+    /// it safe for three servers to read concurrently; mutations
+    /// (profile add / active flip) come from the main actor.
     let profileStore: UpstreamProfileStore
-    /// Sliding-window health metric for the active upstream. Resets
-    /// on profile switch (the previous upstream's bad day has nothing
-    /// to say about the new one). Read by `ModelRoutingPane` to
-    /// surface a "your upstream looks broken" banner.
-    let healthMonitor: LLMUpstreamHealthMonitor
     private(set) var isRunning = false
 
-    var port: UInt16 { server.configuration.port }
-    var openAIUpstream: URL { server.configuration.openAIUpstream }
-    var anthropicUpstream: URL { server.configuration.anthropicUpstream }
+    /// Loopback port for the official-Claude listener. The legacy
+    /// `port` exposure historically meant "the proxy port" —
+    /// preserved here so existing UI / shims that hardcode 9710
+    /// still see a well-defined value. New code that needs to know
+    /// a non-Claude port should use `port(for:)`.
+    var port: UInt16 { port(for: .officialClaude) }
+    var openAIUpstream: URL {
+        listenersByGroup[.officialClaude]?.server.configuration.openAIUpstream
+            ?? URL(string: Self.defaultOpenAIUpstream)!
+    }
+    var anthropicUpstream: URL {
+        listenersByGroup[.officialClaude]?.server.configuration.anthropicUpstream
+            ?? URL(string: Self.defaultAnthropicUpstream)!
+    }
+
+    /// Loopback port for a specific provider group. Falls back to
+    /// the group's static `defaultLoopbackPort` if the listener
+    /// hasn't been built (e.g. test fixture without `init` having
+    /// run yet — defensive only).
+    func port(for group: ProviderGroup) -> UInt16 {
+        listenersByGroup[group]?.server.configuration.port
+            ?? group.defaultLoopbackPort
+    }
+
+    /// Sliding-window health metric for the **currently active**
+    /// profile's group. `ModelRoutingPane` reads this to surface
+    /// "your upstream looks degraded" — the banner reflects the
+    /// group the user is actively talking to, not a global blend.
+    /// `setActiveUpstreamProfile` resets the monitor for the new
+    /// active group so the previous upstream's history doesn't
+    /// follow.
+    var healthMonitor: LLMUpstreamHealthMonitor {
+        let activeProfile = profileStore.currentActiveProfile()
+        let activeGroup = ProviderGroup.infer(profile: activeProfile)
+        return listenersByGroup[activeGroup]?.healthMonitor ?? fallbackHealthMonitor
+    }
 
     init() {
         let credentials = RouterCredentialsStore.live()
         let profiles = UpstreamProfileStore()
-        let health = LLMUpstreamHealthMonitor()
         self.credentialsStore = credentials
         self.profileStore = profiles
-        self.healthMonitor = health
-        self.server = LLMProxyServer(
-            configuration: Self.makeConfiguration(),
-            credentialsStore: credentials,
-            profileResolver: profiles,
-            healthMonitor: health
+        self.listenersByGroup = Self.buildListeners(
+            credentials: credentials,
+            profiles: profiles
         )
         let store = LLMStatsStore()
         self.statsStore = store
@@ -61,6 +105,54 @@ final class LLMProxyCoordinator {
         self.usageObserver.profileResolver = profiles
     }
 
+    /// Build one server-and-monitor pair per `ProviderGroup`. The
+    /// official-Claude listener honors the legacy
+    /// `OpenIsland.LLMProxy.port` UserDefault (so users who
+    /// remapped 9710 keep their override); deepseek + thirdParty
+    /// always bind their group default. Future: per-group port
+    /// override UserDefaults.
+    private static func buildListeners(
+        credentials: RouterCredentialsStore,
+        profiles: UpstreamProfileStore
+    ) -> [ProviderGroup: GroupListener] {
+        var result: [ProviderGroup: GroupListener] = [:]
+        let openAI = readUpstream(
+            key: openAIUpstreamDefaultsKey,
+            fallback: defaultOpenAIUpstream
+        )
+        let anthropic = readUpstream(
+            key: anthropicUpstreamDefaultsKey,
+            fallback: defaultAnthropicUpstream
+        )
+        for group in ProviderGroup.allCases {
+            let port: UInt16 = {
+                if group == .officialClaude {
+                    let raw = UserDefaults.standard.integer(forKey: portDefaultsKey)
+                    if raw > 0 && raw <= 65535 { return UInt16(raw) }
+                }
+                return group.defaultLoopbackPort
+            }()
+            let monitor = LLMUpstreamHealthMonitor()
+            let config = LLMProxyConfiguration(
+                port: port,
+                anthropicUpstream: anthropic,
+                openAIUpstream: openAI,
+                providerGroup: group
+            )
+            let server = LLMProxyServer(
+                configuration: config,
+                credentialsStore: credentials,
+                profileResolver: profiles,
+                healthMonitor: monitor
+            )
+            result[group] = GroupListener(server: server, healthMonitor: monitor)
+        }
+        return result
+    }
+
+    /// Legacy single-config builder kept for tests and the
+    /// `rebuildServers` path. The three-port equivalent is
+    /// `buildListeners(credentials:profiles:)`.
     static func makeConfiguration() -> LLMProxyConfiguration {
         let rawPort = UserDefaults.standard.integer(forKey: portDefaultsKey)
         let port: UInt16 = (rawPort > 0 && rawPort <= 65535) ? UInt16(rawPort) : defaultPort
@@ -160,57 +252,67 @@ final class LLMProxyCoordinator {
 
     func start() {
         guard !isRunning else { return }
-        // C-1 backfill: vet persisted custom profiles BEFORE the
-        // proxy starts accepting traffic. If the active profile
-        // points at a private/loopback host, downgrade to default
-        // here so the very first request after start uses a safe
-        // upstream.
+        // C-1 backfill: vet persisted custom profiles BEFORE any
+        // listener accepts traffic. If the active profile points
+        // at a private/loopback host, downgrade to default here so
+        // the very first request after start uses a safe upstream.
         backfillSSRFPolicy()
-        server.setObserver(usageObserver)
-        do {
-            try server.start()
-            isRunning = true
-            Self.logger.info("LLM proxy started on port \(self.server.configuration.port)")
-        } catch {
-            Self.logger.error("LLM proxy failed to start: \(error.localizedDescription)")
+        // All three listeners share the same observer — usage data
+        // accumulates in a single LLMStatsStore, with each record
+        // tagged by the upstream profile so the UI can split it by
+        // group later.
+        for group in ProviderGroup.allCases {
+            guard let listener = listenersByGroup[group] else { continue }
+            listener.server.setObserver(usageObserver)
+            do {
+                try listener.server.start()
+                Self.logger.info(
+                    "LLM proxy [\(group.logTag, privacy: .public)] started on port \(listener.server.configuration.port)"
+                )
+            } catch {
+                Self.logger.error(
+                    "LLM proxy [\(group.logTag, privacy: .public)] failed to start: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
+        isRunning = true
     }
 
     func stop() {
         guard isRunning else { return }
-        server.stop()
+        for group in ProviderGroup.allCases {
+            guard let listener = listenersByGroup[group] else { continue }
+            listener.server.stop()
+        }
         isRunning = false
     }
 
-    /// Persist the new port and rebuild the underlying NWListener.
-    /// Stops + restarts only if it was running; if the user manually
-    /// stopped the proxy and edits the port, the next manual start
-    /// picks up the new value.
+    /// Persist the new port for the official-Claude listener and
+    /// rebuild. Other groups continue using their static defaults
+    /// — per-group port override UI is a follow-up commit.
     func setPort(_ newPort: UInt16) {
         UserDefaults.standard.set(Int(newPort), forKey: Self.portDefaultsKey)
-        rebuildServer()
+        rebuildServers()
     }
 
     /// Persist a new OpenAI-compatible upstream and rebuild. Use
     /// `LLMProxyCoordinator.validatedUpstream(_:)` to vet input first.
     func setOpenAIUpstream(_ url: URL) {
         UserDefaults.standard.set(url.absoluteString, forKey: Self.openAIUpstreamDefaultsKey)
-        rebuildServer()
+        rebuildServers()
     }
 
     func setAnthropicUpstream(_ url: URL) {
         UserDefaults.standard.set(url.absoluteString, forKey: Self.anthropicUpstreamDefaultsKey)
-        rebuildServer()
+        rebuildServers()
     }
 
-    private func rebuildServer() {
+    private func rebuildServers() {
         let wasRunning = isRunning
         if wasRunning { stop() }
-        self.server = LLMProxyServer(
-            configuration: Self.makeConfiguration(),
-            credentialsStore: credentialsStore,
-            profileResolver: profileStore,
-            healthMonitor: healthMonitor
+        self.listenersByGroup = Self.buildListeners(
+            credentials: credentialsStore,
+            profiles: profileStore
         )
         if wasRunning { start() }
     }

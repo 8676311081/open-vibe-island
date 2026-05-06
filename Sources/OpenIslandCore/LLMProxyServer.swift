@@ -29,19 +29,29 @@ public struct LLMProxyConfiguration: Sendable {
     /// pre-connect / proxy-resolution stalls from black-holing the
     /// local client connection.
     public var upstreamFirstByteTimeout: TimeInterval
+    /// Provider group this listener serves. When non-nil the proxy
+    /// rejects any inbound request whose resolved profile maps to a
+    /// different group with HTTP 421 (Misdirected Request) — that's
+    /// what makes "9710 = official Claude only" actually enforceable
+    /// instead of relying on shim-side discipline. `nil` keeps the
+    /// pre-three-port behavior of accepting any group, used by the
+    /// older single-listener tests + legacy single-listener startup.
+    public var providerGroup: ProviderGroup?
 
     public init(
         port: UInt16 = 9710,
         anthropicUpstream: URL = URL(string: "https://api.anthropic.com")!,
         openAIUpstream: URL = URL(string: "https://api.openai.com")!,
         bypassSystemProxy: Bool = true,
-        upstreamFirstByteTimeout: TimeInterval = 30
+        upstreamFirstByteTimeout: TimeInterval = 30,
+        providerGroup: ProviderGroup? = nil
     ) {
         self.port = port
         self.anthropicUpstream = anthropicUpstream
         self.openAIUpstream = openAIUpstream
         self.bypassSystemProxy = bypassSystemProxy
         self.upstreamFirstByteTimeout = upstreamFirstByteTimeout
+        self.providerGroup = providerGroup
     }
 
     public static let `default` = LLMProxyConfiguration()
@@ -549,6 +559,38 @@ public final class LLMProxyServer: @unchecked Sendable {
             resolved = nil
         }
 
+        // Three-port group policy enforcement. When this listener is
+        // bound to a specific `ProviderGroup`, reject any request
+        // whose resolved profile belongs to a different group with
+        // 421 Misdirected Request. RFC 7540 §9.1.2 designed 421 for
+        // exactly this case ("the request was directed at a server
+        // that is not able to produce a response"). The shim layer
+        // (claude-3 etc.) is supposed to dispatch to the correct
+        // port; this enforcement is the safety net that closes the
+        // hole if a user manually points `ANTHROPIC_BASE_URL` at the
+        // wrong port. Without it, "9710 = official Claude only" is
+        // a polite suggestion, not a guarantee.
+        //
+        // `nil` providerGroup means "legacy single-listener mode" —
+        // no group constraint, accept anything. Tests and the older
+        // single-listener startup path still rely on this.
+        if let listenerGroup = configuration.providerGroup,
+           let profile = resolved?.profile {
+            let profileGroup = ProviderGroup.infer(profile: profile)
+            if profileGroup != listenerGroup {
+                respondLocally(
+                    state: state,
+                    status: 421,
+                    body: Self.makeGroupMismatchBody(
+                        listenerGroup: listenerGroup,
+                        profileGroup: profileGroup,
+                        profileId: profile.id
+                    )
+                )
+                return
+            }
+        }
+
         let upstream = LLMUpstreamRouter.route(
             path: requestPath,
             headers: head.lowercasedHeaders
@@ -722,6 +764,38 @@ public final class LLMProxyServer: @unchecked Sendable {
     /// list of valid alternatives so a typo is one fix away.
     /// Built at runtime because the unknown id and the available
     /// list are dynamic.
+    /// 421 body returned when this listener's `providerGroup` does
+    /// not match the resolved profile's group (three-port routing
+    /// enforcement). Includes the listener's port via `listenerGroup
+    /// .defaultLoopbackPort` and the correct port for the profile's
+    /// group, so the client's error log gives the user a concrete
+    /// "use this URL instead" pointer.
+    static func makeGroupMismatchBody(
+        listenerGroup: ProviderGroup,
+        profileGroup: ProviderGroup,
+        profileId: String
+    ) -> String {
+        let payload: [String: Any] = [
+            "type": "error",
+            "error": [
+                "type": "open_island_port_group_mismatch",
+                "listener_group": listenerGroup.rawValue,
+                "listener_port": Int(listenerGroup.defaultLoopbackPort),
+                "profile_id": profileId,
+                "profile_group": profileGroup.rawValue,
+                "expected_port": Int(profileGroup.defaultLoopbackPort),
+                "message": "This Open Island listener serves the `\(listenerGroup.rawValue)` group only. The active profile `\(profileId)` belongs to `\(profileGroup.rawValue)` — connect to 127.0.0.1:\(profileGroup.defaultLoopbackPort) (or use the matching `claude-3` shim) for that profile."
+            ] as [String: Any]
+        ]
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: payload),
+            let s = String(data: data, encoding: .utf8)
+        else {
+            return #"{"type":"error","error":{"type":"open_island_port_group_mismatch"}}"#
+        }
+        return s
+    }
+
     static func makeUnknownOverrideBody(
         id: String,
         available: [String]
