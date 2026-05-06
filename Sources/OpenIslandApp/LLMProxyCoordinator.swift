@@ -92,6 +92,14 @@ final class LLMProxyCoordinator {
         let profiles = UpstreamProfileStore()
         self.credentialsStore = credentials
         self.profileStore = profiles
+        // Run the legacy-upstream migration BEFORE building any
+        // listener, so a profile that was implicit in the old
+        // single-listener `openAIUpstream` / `anthropicUpstream`
+        // UserDefault becomes a real custom profile in the store
+        // and shows up in routing UI / per-group attribution from
+        // launch one. Idempotent: subsequent runs see the
+        // migration-marker key and no-op.
+        Self.migrateLegacyUpstreamsIfNeeded(into: profiles)
         self.listenersByGroup = Self.buildListeners(
             credentials: credentials,
             profiles: profiles
@@ -103,6 +111,106 @@ final class LLMProxyCoordinator {
         // fallback path can read ProfileCostMetadata for models not
         // in the static LLMPricing table (e.g. deepseek-v4-pro).
         self.usageObserver.profileResolver = profiles
+    }
+
+    // MARK: - Legacy upstream migration (Billing P2)
+
+    /// Marker so we only attempt the migration once per install. The
+    /// migration is idempotent in result but we don't want to spam
+    /// the logger every launch with "no legacy upstream to migrate".
+    static let legacyMigrationDoneKey = "OpenIsland.LLMProxy.legacyMigration.v1"
+    static let legacyOpenAIProfileID = "legacy-openai-upstream"
+    static let legacyAnthropicProfileID = "legacy-anthropic-upstream"
+
+    /// Promote the pre-three-port `openAIUpstream` /
+    /// `anthropicUpstream` UserDefaults into first-class custom
+    /// profiles. Codex's review pointed out that ripping the
+    /// "Upstream URL" inputs out of the spend pane without
+    /// migrating them silently strands the user's configuration —
+    /// this commit's job is to land the data; later UI commits hide
+    /// the inputs.
+    ///
+    /// Migration rules:
+    /// - Read legacy key. If unset OR equal to the well-known
+    ///   default (`https://api.openai.com` /
+    ///   `https://api.anthropic.com`), skip — there's nothing to
+    ///   migrate.
+    /// - Otherwise create a custom profile with a stable id
+    ///   (`legacy-openai-upstream` / `legacy-anthropic-upstream`)
+    ///   pointing at the user's URL. `addCustomProfile` is
+    ///   idempotent on (id, profile) so a double-launch race or a
+    ///   stale marker isn't dangerous.
+    /// - Custom profile lands in `thirdParty` group via
+    ///   `ProviderGroup.infer(profile:)` regardless of host —
+    ///   billing / blame for the user's reverse proxy is theirs,
+    ///   not the upstream vendor's.
+    /// - Legacy UserDefault keys are kept on disk so any code path
+    ///   that still reads them gets the same value. The next
+    ///   commit hides the inputs; a later major version can drop
+    ///   the keys after telemetry shows zero non-default writes.
+    static func migrateLegacyUpstreamsIfNeeded(
+        into profiles: UpstreamProfileStore,
+        defaults: UserDefaults = .standard
+    ) {
+        guard !defaults.bool(forKey: legacyMigrationDoneKey) else { return }
+        defer {
+            defaults.set(true, forKey: legacyMigrationDoneKey)
+        }
+        migrateOne(
+            key: openAIUpstreamDefaultsKey,
+            defaultValue: defaultOpenAIUpstream,
+            profileID: legacyOpenAIProfileID,
+            displayName: "Legacy OpenAI Upstream",
+            into: profiles,
+            defaults: defaults
+        )
+        migrateOne(
+            key: anthropicUpstreamDefaultsKey,
+            defaultValue: defaultAnthropicUpstream,
+            profileID: legacyAnthropicProfileID,
+            displayName: "Legacy Anthropic Upstream",
+            into: profiles,
+            defaults: defaults
+        )
+    }
+
+    private static func migrateOne(
+        key: String,
+        defaultValue: String,
+        profileID: String,
+        displayName: String,
+        into profiles: UpstreamProfileStore,
+        defaults: UserDefaults
+    ) {
+        guard let stored = defaults.string(forKey: key),
+              !stored.isEmpty,
+              stored != defaultValue,
+              let url = validatedUpstream(stored) else {
+            return
+        }
+        let profile = UpstreamProfile(
+            id: profileID,
+            displayName: displayName,
+            baseURL: url,
+            keychainAccount: profileID,
+            modelOverride: nil,
+            isCustom: true,
+            costMetadata: nil
+        )
+        do {
+            try profiles.addCustomProfile(profile)
+            logger.info(
+                "Legacy upstream \(key, privacy: .public) → migrated to custom profile \(profileID, privacy: .public) (\(url.absoluteString, privacy: .public))"
+            )
+        } catch {
+            // Common case: a previous failed run already wrote the
+            // profile. addCustomProfile rejects exact-id collisions
+            // with the same id, but tolerates re-add of the same
+            // profile content — log and move on.
+            logger.notice(
+                "Legacy upstream \(key, privacy: .public) migration skipped: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     /// Build one server-and-monitor pair per `ProviderGroup`. The
