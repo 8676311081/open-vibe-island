@@ -386,5 +386,11 @@
 "modelRouting.health.degraded.body" = "最近 %d 次请求超过 80%% 失败。如果不是暂时性问题，建议切回 Anthropic Native。";
 "modelRouting.health.degraded.switchBack" = "切回 Anthropic";
 
+"modelRouting.compactMenu.builtinSection" = "内置";
+"modelRouting.compactMenu.customSection" = "自定义";
+"modelRouting.compactMenu.openSettings" = "管理路由配置…";
+"modelRouting.compactMenu.tooltip" = "当前路由配置 — 点击切换";
+"modelRouting.compactMenu.a11yLabel" = "当前路由配置";
+
 /* 通用 */
 "common.cancel" = "取消";

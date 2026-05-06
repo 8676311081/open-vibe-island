@@ -387,5 +387,11 @@
 "modelRouting.health.degraded.body" = "More than 80%% of the last %d requests failed. Switch back to Anthropic Native if this isn't temporary.";
 "modelRouting.health.degraded.switchBack" = "Switch to Anthropic";
 
+"modelRouting.compactMenu.builtinSection" = "Built-in";
+"modelRouting.compactMenu.customSection" = "Custom";
+"modelRouting.compactMenu.openSettings" = "Manage profiles…";
+"modelRouting.compactMenu.tooltip" = "Active routing profile — click to switch";
+"modelRouting.compactMenu.a11yLabel" = "Active routing profile";
+
 /* Common */
 "common.cancel" = "Cancel";

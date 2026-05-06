@@ -1,6 +1,7 @@
 import SwiftUI
 @preconcurrency import MarkdownUI
 import OpenIslandCore
+import os
 
 private struct NotificationContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -99,6 +100,7 @@ private struct ConditionalDrawingGroup: ViewModifier {
 // MARK: - Main island view
 
 struct IslandPanelView: View {
+    private static let logger = Logger(subsystem: "app.openisland", category: "IslandPanelView")
     private static let headerControlButtonSize: CGFloat = 22
     private static let headerControlSpacing: CGFloat = 8
     private static let headerHorizontalPadding: CGFloat = 18
@@ -465,19 +467,66 @@ struct IslandPanelView: View {
     }
 
     /// Chip rendering the active routing profile abbreviation
-    /// (ANT / DSV4P / DSV4F / CUSTOM). Tap deep-links to the
-    /// Model Routing settings pane. Lives only in the OPENED state
-    /// header — the closed notch has no horizontal room (already
-    /// crammed with icon + count badge), and at the at-a-glance
-    /// level provider identity isn't load-bearing. Reads the active
-    /// profile from `model.activeUpstreamProfileId` so the chip
-    /// re-renders the moment the user confirms a switch in
-    /// ModelRoutingPane.
+    /// (ANT / DSV4P / DSV4F / CUSTOM). Tap opens a Cursor-style
+    /// shortlist Menu — every registered profile (builtins + the
+    /// user's custom entries) is one tap away from becoming
+    /// active, without leaving the current terminal. The bottom
+    /// of the menu deep-links to the full Model Routing settings
+    /// pane for credential management / SSRF host edits / etc.
+    ///
+    /// Lives only in the OPENED state header — the closed notch
+    /// has no horizontal room (already crammed with icon + count
+    /// badge), and at the at-a-glance level provider identity
+    /// isn't load-bearing. Reads the active profile from
+    /// `model.activeUpstreamProfileId` so the chip re-renders
+    /// the moment the switch lands.
     @ViewBuilder
     private var activeRoutingProfileChip: some View {
         let profile = model.activeUpstreamProfile
         let abbreviation = profile.compactPillAbbreviation
-        Button(action: { model.openModelRouting() }) {
+        Menu {
+            // Header: a non-interactive label naming the active
+            // profile. Sets context inside the menu in case the
+            // chip's abbreviation isn't recognized at a glance.
+            Section {
+                Text(model.lang.t(profile.displayName))
+                    .font(.caption)
+            }
+            // Builtins first, in `BuiltinProfiles.all` order.
+            // Anthropic native is always the first entry; that's
+            // the right top-of-list anchor — even though it 401s
+            // for Max/Pro OAuth users, it's still the most-asked-
+            // for "switch back to default" option.
+            Section(model.lang.t("modelRouting.compactMenu.builtinSection")) {
+                ForEach(BuiltinProfiles.all) { entry in
+                    profileMenuRow(for: entry)
+                }
+            }
+            // Custom profiles get their own section so they're
+            // visually distinct from the curated builtins. If the
+            // user has none, this section disappears.
+            let customs = model.llmProxy.profileStore
+                .allProfiles
+                .filter(\.isCustom)
+            if !customs.isEmpty {
+                Section(model.lang.t("modelRouting.compactMenu.customSection")) {
+                    ForEach(customs) { entry in
+                        profileMenuRow(for: entry)
+                    }
+                }
+            }
+            // Footer: deep-link to the full pane for
+            // credential / SSRF host / cost-metadata editing.
+            Divider()
+            Button {
+                model.openModelRouting()
+            } label: {
+                Label(
+                    model.lang.t("modelRouting.compactMenu.openSettings"),
+                    systemImage: "slider.horizontal.3"
+                )
+            }
+        } label: {
             Text(abbreviation)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
@@ -485,9 +534,52 @@ struct IslandPanelView: View {
                 .frame(height: Self.headerControlButtonSize)
                 .background(profile.compactPillTintColor.opacity(0.85), in: Capsule())
         }
-        .buttonStyle(.plain)
-        .help("Active routing profile — click to change")
-        .accessibilityLabel(Text("Active routing profile: \(abbreviation)"))
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text(model.lang.t("modelRouting.compactMenu.tooltip")))
+        .accessibilityLabel(Text(model.lang.t("modelRouting.compactMenu.a11yLabel")) + Text(": \(abbreviation)"))
+    }
+
+    /// One row inside the routing-profile shortlist menu. Shows
+    /// `displayName`, the same compact-pill abbreviation that the
+    /// chip itself uses (so the visual link "this is the same
+    /// thing" is obvious), and a checkmark on the active row.
+    /// Tapping switches active profile via the AppModel API
+    /// which mirrors into the observable id; the chip + any other
+    /// view bound to `activeUpstreamProfileId` re-renders.
+    @ViewBuilder
+    private func profileMenuRow(for entry: UpstreamProfile) -> some View {
+        let isActive = entry.id == model.activeUpstreamProfileId
+        Button {
+            // Don't no-op silently when re-selecting the active
+            // row; users sometimes click an already-active item
+            // expecting a "reload" signal. We can wire that to
+            // healthMonitor.reset() if useful — for now treat it
+            // as a true no-op since the underlying setActive
+            // throws on unknown ids only.
+            guard !isActive else { return }
+            do {
+                try model.setActiveUpstreamProfile(entry.id)
+            } catch {
+                // Swallow: setActive only throws on unknown id,
+                // and we just iterated `allProfiles`. If it
+                // somehow fires, log and let the chip stay on
+                // the old active.
+                Self.logger.error("compact-menu profile switch failed: \(error.localizedDescription)")
+            }
+        } label: {
+            HStack {
+                if isActive {
+                    Image(systemName: "checkmark")
+                }
+                Text(model.lang.t(entry.displayName))
+                Spacer()
+                Text(entry.compactPillAbbreviation)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     /// Compact context-fill bar shown next to the spend pill text.
