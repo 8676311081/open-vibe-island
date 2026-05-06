@@ -160,6 +160,16 @@ public actor LLMUsageObserver: LLMProxyObserver {
         let unusedTokensWasted = unused.reduce(0) { acc, name in
             acc + (state.declaredTools.estimatedTokensPerTool[name] ?? 0)
         }
+        // Three-port attribution: derive the routing group from the
+        // profile we already resolved for cost lookup. costProfile is
+        // the same `UpstreamProfile` the proxy hot path resolved at
+        // request entry — by the time we get here, it represents the
+        // upstream the bytes actually went to (T2's resolvedProfileId
+        // is captured at handleParsedRequest entry, immune to mid-
+        // flight active-profile flips). Falls through to nil when
+        // there's no resolver wired (legacy / fixture path) and the
+        // store skips group accounting.
+        let providerGroup: ProviderGroup? = costProfile.map(ProviderGroup.infer(profile:))
         if usage != .zero || !toolUses.isEmpty {
             await store.recordRequestCompletion(
                 date: context.receivedAt,
@@ -167,7 +177,8 @@ public actor LLMUsageObserver: LLMProxyObserver {
                 model: state.model,
                 usage: usage,
                 costUsd: cost,
-                unusedToolTokensWasted: unusedTokensWasted
+                unusedToolTokensWasted: unusedTokensWasted,
+                providerGroup: providerGroup
             )
         }
         for (name, hash) in toolUses {

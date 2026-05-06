@@ -56,6 +56,21 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     public var modelInputTokens: [String: Int]
     public var modelCacheReadTokens: [String: Int]
     public var modelCacheCreationTokens: [String: Int]
+    /// Per-provider-group turn count. Key is `ProviderGroup.rawValue`
+    /// (`officialClaude` / `deepseek` / `thirdParty`). Sum across keys
+    /// equals `turns` once every recorded turn has a group; legacy
+    /// buckets and turns recorded before the three-port split decode
+    /// to `[:]` and the spend UI shows `—`.
+    public var groupTurns: [String: Int]
+    /// Per-provider-group accumulated cost USD. Same keying as
+    /// `groupTurns`. Sum equals `costUsd` minus unpriced turns.
+    public var groupCosts: [String: Double]
+    /// Per-provider-group accumulated tokens (in + cache_write +
+    /// cache_read + out). Mirrors `modelTokens` shape but rolled up
+    /// to the routing layer instead of the model name. Lets the
+    /// spend UI's three-card layout pull `9710 → ?M tokens` /
+    /// `9711 → $X` directly from one bucket dictionary.
+    public var groupTokens: [String: Int]
     public var duplicateToolCalls: Int
     /// Sum of estimated tokens for tools the model declared in
     /// `tools[]` but never invoked during the turn. Estimated from
@@ -82,6 +97,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         modelInputTokens: [String: Int] = [:],
         modelCacheReadTokens: [String: Int] = [:],
         modelCacheCreationTokens: [String: Int] = [:],
+        groupTurns: [String: Int] = [:],
+        groupCosts: [String: Double] = [:],
+        groupTokens: [String: Int] = [:],
         duplicateToolCalls: Int = 0,
         unusedToolTokensWasted: Int = 0,
         lastWarning: LLMDuplicateWarning? = nil,
@@ -101,6 +119,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         self.modelInputTokens = modelInputTokens
         self.modelCacheReadTokens = modelCacheReadTokens
         self.modelCacheCreationTokens = modelCacheCreationTokens
+        self.groupTurns = groupTurns
+        self.groupCosts = groupCosts
+        self.groupTokens = groupTokens
         self.duplicateToolCalls = duplicateToolCalls
         self.unusedToolTokensWasted = unusedToolTokensWasted
         self.lastWarning = lastWarning
@@ -113,6 +134,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         case costUsd, unpricedTurns
         case modelTurns, modelCosts, modelTokens
         case modelInputTokens, modelCacheReadTokens, modelCacheCreationTokens
+        case groupTurns, groupCosts, groupTokens
         case duplicateToolCalls
         case unusedToolTokensWasted
         case lastWarning, lastUpdatedAt
@@ -134,6 +156,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         modelInputTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelInputTokens) ?? [:]
         modelCacheReadTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelCacheReadTokens) ?? [:]
         modelCacheCreationTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelCacheCreationTokens) ?? [:]
+        groupTurns = try c.decodeIfPresent([String: Int].self, forKey: .groupTurns) ?? [:]
+        groupCosts = try c.decodeIfPresent([String: Double].self, forKey: .groupCosts) ?? [:]
+        groupTokens = try c.decodeIfPresent([String: Int].self, forKey: .groupTokens) ?? [:]
         duplicateToolCalls = try c.decodeIfPresent(Int.self, forKey: .duplicateToolCalls) ?? 0
         unusedToolTokensWasted = try c.decodeIfPresent(Int.self, forKey: .unusedToolTokensWasted) ?? 0
         lastWarning = try c.decodeIfPresent(LLMDuplicateWarning.self, forKey: .lastWarning)
@@ -312,7 +337,8 @@ public actor LLMStatsStore {
         model: String? = nil,
         usage: TokenUsage,
         costUsd: Double?,
-        unusedToolTokensWasted: Int = 0
+        unusedToolTokensWasted: Int = 0,
+        providerGroup: ProviderGroup? = nil
     ) {
         let key = Self.dayKey(for: date)
         var dayBuckets = snapshot.days[key] ?? [:]
@@ -342,6 +368,21 @@ public actor LLMStatsStore {
             bucket.modelInputTokens[model, default: 0] += usage.input
             bucket.modelCacheReadTokens[model, default: 0] += usage.cacheRead
             bucket.modelCacheCreationTokens[model, default: 0] += usage.cacheWrite
+        }
+        // Per-group attribution. Same shape as the per-model maps above
+        // but rolled up at the routing layer (officialClaude / deepseek
+        // / thirdParty). Lets the spend UI pull "9710 cost so far",
+        // "9711 today", etc. without having to re-derive the group from
+        // the model name. Skipped silently when the caller didn't
+        // supply a group — matches the legacy single-listener path
+        // that's kept for tests.
+        if let providerGroup {
+            let key = providerGroup.rawValue
+            bucket.groupTurns[key, default: 0] += 1
+            bucket.groupTokens[key, default: 0] += usage.input + usage.cacheWrite + usage.cacheRead + usage.output
+            if let costUsd {
+                bucket.groupCosts[key, default: 0] += costUsd
+            }
         }
         bucket.lastUpdatedAt = date
         dayBuckets[client.rawValue] = bucket
