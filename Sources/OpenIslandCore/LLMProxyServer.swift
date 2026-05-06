@@ -846,6 +846,14 @@ public final class LLMProxyServer: @unchecked Sendable {
             healthMonitor: healthMonitor,
             logger: Self.logger
         )
+        handler.setTaskCancellation { [weak task, weak delegate = sessionDelegate] in
+            guard let task else { return }
+            Self.logger.debug(
+                "forward cancelling upstream id=\(context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public)"
+            )
+            task.cancel()
+            delegate?.unregister(task: task)
+        }
         sessionDelegate.register(task: task, handler: handler)
         installFirstByteWatchdogIfNeeded(task: task, handler: handler)
         Self.logger.debug(
@@ -855,12 +863,15 @@ public final class LLMProxyServer: @unchecked Sendable {
         Self.logger.debug(
             "forward task resumed id=\(context.id.uuidString, privacy: .public) task=\(task.taskIdentifier, privacy: .public)"
         )
-        // Once URLSession task is in flight, disable the connection's
-        // stateUpdateHandler. ProxyTaskHandler now owns the connection
-        // lifecycle and will manage cleanup via didCompleteWithError.
-        // This prevents a race where .waiting would cancel the connection
-        // mid-flight.
-        state.connection.stateUpdateHandler = nil
+        // Once URLSession task is in flight, ProxyTaskHandler owns
+        // the client connection lifecycle. Keep state observation
+        // enabled so a cancelled / failed local client cancels the
+        // upstream task instead of letting response bytes pile up in
+        // the loopback socket send queue. `.waiting` remains log-only
+        // because NWConnection can report it transiently on loopback.
+        state.connection.stateUpdateHandler = { [weak handler] connState in
+            handler?.handleConnectionState(connState)
+        }
     }
 
     private func installFirstByteWatchdogIfNeeded(
@@ -1160,10 +1171,16 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     /// nil-during-callback race a weak reference would create.
     let healthMonitor: LLMUpstreamHealthMonitor?
     let logger: Logger
+    private let maxOutstandingSendBytes = 8 * 1024 * 1024
+    private let sendProgressTimeout: TimeInterval = 15
     private var sentHeaders = false
     private var completed = false
+    private var terminated = false
     private let lock = NSLock()
     private var firstByteWatchdog: DispatchSourceTimer?
+    private var sendProgressWatchdog: DispatchSourceTimer?
+    private var outstandingSendBytes = 0
+    private var cancelUpstreamTask: (() -> Void)?
     /// Last HTTP status the upstream returned. Drives the
     /// success/failure decision in `handleCompletion`.
     private var lastSeenStatus: Int?
@@ -1184,6 +1201,12 @@ private final class ProxyTaskHandler: @unchecked Sendable {
         self.logger = logger
     }
 
+    func setTaskCancellation(_ cancel: @escaping () -> Void) {
+        lock.lock()
+        cancelUpstreamTask = cancel
+        lock.unlock()
+    }
+
     func setFirstByteWatchdog(_ timer: DispatchSourceTimer) {
         lock.lock()
         firstByteWatchdog = timer
@@ -1193,7 +1216,7 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     @discardableResult
     func handleFirstByteTimeout(timeout: TimeInterval) -> Bool {
         lock.lock()
-        if completed || sentHeaders {
+        if completed || sentHeaders || terminated {
             lock.unlock()
             return false
         }
@@ -1236,9 +1259,32 @@ private final class ProxyTaskHandler: @unchecked Sendable {
         timer?.cancel()
     }
 
+    func handleConnectionState(_ state: NWConnection.State) {
+        switch state {
+        case let .failed(error):
+            terminateForClientWrite(
+                reason: "client connection failed: \(error.localizedDescription)",
+                error: error,
+                cancelUpstream: true
+            )
+        case let .waiting(error):
+            logger.debug(
+                "forward client connection waiting id=\(self.context.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        case .cancelled:
+            terminateForClientWrite(
+                reason: "client connection cancelled",
+                error: Self.makeError("client connection cancelled"),
+                cancelUpstream: true
+            )
+        default:
+            break
+        }
+    }
+
     func handleResponseHead(_ resp: HTTPURLResponse) {
         lock.lock()
-        if completed {
+        if completed || terminated {
             lock.unlock()
             return
         }
@@ -1262,10 +1308,18 @@ private final class ProxyTaskHandler: @unchecked Sendable {
             reasonPhrase: LLMProxyServer.reasonPhrase(for: status),
             headers: headers
         )
+        guard trackClientSendStarted(bytes: headerData.count, label: "response-headers") else {
+            return
+        }
         connection.send(content: headerData, completion: .contentProcessed { [logger] error in
             if let error {
                 logger.warning("send response headers failed: \(error.localizedDescription)")
             }
+            self.trackClientSendFinished(
+                bytes: headerData.count,
+                label: "response-headers",
+                error: error
+            )
         })
         if let captured = observer {
             let ctx = context
@@ -1277,13 +1331,21 @@ private final class ProxyTaskHandler: @unchecked Sendable {
     func handleResponseChunk(_ data: Data) {
         guard !data.isEmpty else { return }
         lock.lock()
-        let isCompleted = completed
+        let isCompleted = completed || terminated
         lock.unlock()
         guard !isCompleted else { return }
+        guard trackClientSendStarted(bytes: data.count, label: "response-chunk") else {
+            return
+        }
         connection.send(content: data, completion: .contentProcessed { [logger] error in
             if let error {
                 logger.debug("send response chunk failed: \(error.localizedDescription)")
             }
+            self.trackClientSendFinished(
+                bytes: data.count,
+                label: "response-chunk",
+                error: error
+            )
         })
         if let captured = observer {
             let ctx = context
@@ -1294,7 +1356,7 @@ private final class ProxyTaskHandler: @unchecked Sendable {
 
     func handleCompletion(error: (any Error)?) {
         lock.lock()
-        if completed {
+        if completed || terminated {
             lock.unlock()
             return
         }
@@ -1322,7 +1384,16 @@ private final class ProxyTaskHandler: @unchecked Sendable {
             )
             var packet = header
             packet.append(bodyData)
-            connection.send(content: packet, isComplete: true, completion: .contentProcessed { _ in })
+            let packetBytes = packet.count
+            if trackClientSendStarted(bytes: packetBytes, label: "upstream-error") {
+                connection.send(content: packet, isComplete: true, completion: .contentProcessed { error in
+                    self.trackClientSendFinished(
+                        bytes: packetBytes,
+                        label: "upstream-error",
+                        error: error
+                    )
+                })
+            }
         }
         let connectionRef = connection
         connection.send(
@@ -1332,6 +1403,7 @@ private final class ProxyTaskHandler: @unchecked Sendable {
                 if let sendErr {
                     logger.debug("send EOF failed: \(sendErr.localizedDescription)")
                 }
+                self.disarmClientSendWatchdogIfIdle()
                 connectionRef.cancel()
             }
         )
@@ -1351,11 +1423,145 @@ private final class ProxyTaskHandler: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    private func trackClientSendStarted(bytes: Int, label: String) -> Bool {
+        var shouldArmWatchdog = false
+        var shouldTerminate = false
+        lock.lock()
+        if terminated {
+            lock.unlock()
+            return false
+        }
+        outstandingSendBytes += bytes
+        if outstandingSendBytes > maxOutstandingSendBytes {
+            shouldTerminate = true
+        } else if sendProgressWatchdog == nil {
+            shouldArmWatchdog = true
+        }
+        lock.unlock()
+
+        if shouldTerminate {
+            terminateForClientWrite(
+                reason: "client write backlog exceeded \(maxOutstandingSendBytes) bytes during \(label)",
+                error: Self.makeError("client write backlog exceeded"),
+                cancelUpstream: true
+            )
+            return false
+        }
+        if shouldArmWatchdog {
+            armClientSendWatchdog()
+        }
+        return true
+    }
+
+    private func trackClientSendFinished(bytes: Int, label: String, error: NWError?) {
+        var timerToCancel: DispatchSourceTimer?
+        lock.lock()
+        outstandingSendBytes = max(0, outstandingSendBytes - bytes)
+        if outstandingSendBytes == 0 {
+            timerToCancel = sendProgressWatchdog
+            sendProgressWatchdog = nil
+        }
+        lock.unlock()
+        timerToCancel?.cancel()
+
+        if let error {
+            terminateForClientWrite(
+                reason: "client write failed during \(label): \(error.localizedDescription)",
+                error: error,
+                cancelUpstream: true
+            )
+        }
+    }
+
+    private func armClientSendWatchdog() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            if self.terminated || self.outstandingSendBytes == 0 || self.sendProgressWatchdog != nil {
+                self.lock.unlock()
+                return
+            }
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            self.sendProgressWatchdog = timer
+            timer.schedule(deadline: .now() + self.sendProgressTimeout)
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                let outstanding = self.outstandingSendBytes
+                self.lock.unlock()
+                guard outstanding > 0 else { return }
+                self.terminateForClientWrite(
+                    reason: "client write made no progress for \(self.sendProgressTimeout)s with \(outstanding) bytes outstanding",
+                    error: Self.makeError("client write timed out"),
+                    cancelUpstream: true
+                )
+            }
+            self.lock.unlock()
+            timer.resume()
+        }
+    }
+
+    private func disarmClientSendWatchdogIfIdle() {
+        var timerToCancel: DispatchSourceTimer?
+        lock.lock()
+        if outstandingSendBytes == 0 {
+            timerToCancel = sendProgressWatchdog
+            sendProgressWatchdog = nil
+        }
+        lock.unlock()
+        timerToCancel?.cancel()
+    }
+
+    private func terminateForClientWrite(
+        reason: String,
+        error: (any Error)?,
+        cancelUpstream: Bool
+    ) {
+        var cancelTask: (() -> Void)?
+        var firstByteTimer: DispatchSourceTimer?
+        var sendTimer: DispatchSourceTimer?
+        lock.lock()
+        if terminated {
+            lock.unlock()
+            return
+        }
+        terminated = true
+        completed = true
+        firstByteTimer = firstByteWatchdog
+        firstByteWatchdog = nil
+        sendTimer = sendProgressWatchdog
+        sendProgressWatchdog = nil
+        outstandingSendBytes = 0
+        if cancelUpstream {
+            cancelTask = cancelUpstreamTask
+            cancelUpstreamTask = nil
+        }
+        lock.unlock()
+
+        firstByteTimer?.cancel()
+        sendTimer?.cancel()
+        logger.warning(
+            "forward terminating id=\(self.context.id.uuidString, privacy: .public) reason=\(reason, privacy: .public) cancelUpstream=\(cancelUpstream, privacy: .public)"
+        )
+        cancelTask?()
+        connection.cancel()
+        notifyCompletion(error: error)
+    }
+
     private func notifyCompletion(error: (any Error)?) {
         if let captured = observer {
             let ctx = context
             let err = error
             Task { await captured.proxy(ctx, didCompleteWithError: err) }
         }
+    }
+
+    private static func makeError(_ description: String) -> NSError {
+        NSError(
+            domain: "app.openisland.llm-proxy",
+            code: -1005,
+            userInfo: [NSLocalizedDescriptionKey: description]
+        )
     }
 }

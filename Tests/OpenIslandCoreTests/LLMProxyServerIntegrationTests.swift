@@ -329,6 +329,39 @@ struct LLMProxyServerIntegrationTests {
         #expect(http2.statusCode == 200)
     }
 
+    @Test
+    func clientDisconnectDuringLargeForwardDoesNotBlockHealthz() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer()
+        defer { Self.teardown(server, storeURL) }
+
+        MockUpstreamProtocol.setResponder { _ in
+            let chunk = Data(repeating: UInt8(ascii: "x"), count: 64 * 1024)
+            return MockUpstreamProtocol.Response(
+                statusCode: 200,
+                headers: ["Content-Type": "text/event-stream"],
+                bodyChunks: Array(repeating: chunk, count: 256)
+            )
+        }
+
+        let body = #"{"model":"claude-opus-4-7","messages":[]}"#
+        let raw = "POST /v1/messages HTTP/1.1\r\n"
+            + "Host: 127.0.0.1:\(port)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n"
+            + "\r\n"
+            + body
+        try await Self.sendRawHTTPAndClose(port: port, request: Data(raw.utf8))
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let req = URLRequest(url: Self.proxyURL(port: port, path: "/healthz"))
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let http = try #require(response as? HTTPURLResponse)
+        #expect(http.statusCode == 200)
+        #expect(String(data: data, encoding: .utf8) == "ok\n")
+        _ = store
+    }
+
     // MARK: - 1.6 hardening: 64 MiB inbound body cap
 
     /// Content-Length declaring a body bigger than the cap → 413,
@@ -421,6 +454,59 @@ struct LLMProxyServerIntegrationTests {
                         }
                     }
                     readMore()
+                case let .failed(err):
+                    if state.markResponded() {
+                        timer.cancel()
+                        cont.resume(throwing: err)
+                    }
+                default:
+                    break
+                }
+            }
+            timer.resume()
+            conn.start(queue: queue)
+        }
+    }
+
+    private static func sendRawHTTPAndClose(
+        port: UInt16,
+        request: Data,
+        timeout: TimeInterval = 3
+    ) async throws {
+        let conn = NWConnection(
+            host: NWEndpoint.Host("127.0.0.1"),
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: .tcp
+        )
+        let queue = DispatchQueue(label: "test.raw-http-close")
+        let state = RawHTTPState()
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + timeout)
+            timer.setEventHandler {
+                if state.markResponded() {
+                    conn.cancel()
+                    cont.resume(throwing: NSError(domain: "test", code: -11, userInfo: [
+                        NSLocalizedDescriptionKey: "raw HTTP send timeout"
+                    ]))
+                }
+            }
+            conn.stateUpdateHandler = { connState in
+                switch connState {
+                case .ready:
+                    conn.send(content: request, completion: .contentProcessed { error in
+                        queue.async {
+                            if state.markResponded() {
+                                timer.cancel()
+                                conn.cancel()
+                                if let error {
+                                    cont.resume(throwing: error)
+                                } else {
+                                    cont.resume()
+                                }
+                            }
+                        }
+                    })
                 case let .failed(err):
                     if state.markResponded() {
                         timer.cancel()
