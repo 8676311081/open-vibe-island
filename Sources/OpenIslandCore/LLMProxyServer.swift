@@ -490,8 +490,30 @@ public final class LLMProxyServer: @unchecked Sendable {
         // shim emits one or the other. Everything downstream uses the
         // cleaned `requestPath`, never head.path, so upstream never
         // sees the sentinel.
+        //
+        // **Deprecation (post three-port split):** sentinels are still
+        // honored for backward compatibility but are no longer the
+        // primary routing mechanism — the listener's port already
+        // expresses provider group, and `OI_PROFILE`-driven shim
+        // dispatch happens against the per-group port directly. The
+        // family sentinel in particular is fully replaced by binding
+        // 9711 to ProviderGroup.deepseek (any non-deepseek active
+        // profile gets 421 from the listener — same effect as the
+        // family check, but uniform across manual ANTHROPIC_BASE_URL
+        // overrides too). We log .info on hit so a future telemetry
+        // sweep can confirm zero traffic before deletion.
         let (requiredFamily, pathAfterFamily) = Self.parseFamilySentinel(path: head.path)
         let (overrideId, requestPath) = Self.parseSentinel(path: pathAfterFamily)
+        if requiredFamily != nil {
+            Self.logger.info(
+                "deprecated /_oi/family/ sentinel hit on port=\(self.configuration.port, privacy: .public) — bind to the matching per-group port instead"
+            )
+        }
+        if overrideId != nil {
+            Self.logger.debug(
+                "/_oi/profile/<id> override sentinel hit on port=\(self.configuration.port, privacy: .public)"
+            )
+        }
 
         if requestPath == "/healthz" || requestPath == "/healthz/" {
             respondLocally(
