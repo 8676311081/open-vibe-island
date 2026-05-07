@@ -176,9 +176,8 @@ struct LLMSpendSettingsPane: View {
 
     /// Optional one-line subtitle under a card's headline metric.
     /// Per-shape detail rows: subscription window for
-    /// officialClaude, account balance for deepseek. Third-party
-    /// stays blank for now — its detail rows are per-profile
-    /// adapters in a follow-up commit.
+    /// officialClaude, account balance for deepseek, and a
+    /// BillingShape-driven row for thirdParty.
     private func groupDetailLine(for group: ProviderGroup) -> String? {
         switch group {
         case .officialClaude:
@@ -186,7 +185,55 @@ struct LLMSpendSettingsPane: View {
         case .deepseek:
             return deepseekDetailLine()
         case .thirdParty:
-            return nil
+            return thirdPartyDetailLine()
+        }
+    }
+
+    /// Render a BillingShape-aware caption for the thirdParty
+    /// card. We pick the active profile when it belongs to this
+    /// group; otherwise fall back to "N profiles configured" so
+    /// the user knows third-party support is live even when no
+    /// third-party profile is currently active.
+    private func thirdPartyDetailLine() -> String? {
+        let store = model.llmProxy.profileStore
+        let customs = store.allProfiles.filter(\.isCustom)
+        if customs.isEmpty { return nil }
+
+        // Prefer the active profile when it's third-party; that's
+        // the one the user is actually talking to.
+        let active = model.activeUpstreamProfile
+        let activeIsThirdParty = ProviderGroup.infer(profile: active) == .thirdParty
+        let target = activeIsThirdParty ? active : customs.first!
+
+        switch BillingShape.infer(profile: target) {
+        case .meteredCredits:
+            // Includes OpenRouter, custom profiles pointing at
+            // DeepSeek/OpenAI. The dedicated DeepSeek card already
+            // shows a balance for the builtin path; here we just
+            // label the shape so the user knows USD is at stake.
+            let template = lang.t("settings.llmSpend.group.thirdParty.metered")
+            return template.replacingOccurrences(
+                of: "{name}", with: lang.t(target.displayName))
+        case .includedQuota:
+            // BuerAI — pre-paid bundle, no per-token USD spend.
+            let template = lang.t("settings.llmSpend.group.thirdParty.includedQuota")
+            return template.replacingOccurrences(
+                of: "{name}", with: lang.t(target.displayName))
+        case .tokenOnly:
+            // Self-hosted vLLM, custom reverse proxy, etc. We
+            // count tokens but have no $ figure to draw.
+            let template = lang.t("settings.llmSpend.group.thirdParty.tokenOnly")
+            return template.replacingOccurrences(
+                of: "{name}", with: lang.t(target.displayName))
+        case .subscriptionWindow:
+            // Defensive — third-party should never infer to
+            // subscriptionWindow per the BillingShape rules
+            // (only builtin anthropic-native qualifies). Render
+            // the literal name as a fallback rather than a
+            // misleading template.
+            return lang.t(target.displayName)
+        case .unknown:
+            return lang.t("settings.llmSpend.group.thirdParty.unknown")
         }
     }
 

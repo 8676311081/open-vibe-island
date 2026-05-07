@@ -244,6 +244,10 @@
 "settings.llmSpend.group.officialClaude.fiveHour.template" = "5 小时：已用 {percent}% · {resetIn} 后重置";
 "settings.llmSpend.group.deepseek.balance.template" = "余额：{amount} {currency}";
 "settings.llmSpend.group.deepseek.balance.unavailable" = "余额：{amount} {currency}（账户不可用）";
+"settings.llmSpend.group.thirdParty.metered" = "{name} · 按量计费";
+"settings.llmSpend.group.thirdParty.includedQuota" = "{name} · 套餐额度";
+"settings.llmSpend.group.thirdParty.tokenOnly" = "{name} · 仅记 token";
+"settings.llmSpend.group.thirdParty.unknown" = "暂无账单数据";
 "settings.llmSpend.byClient" = "今日各客户端";
 "settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "轮次";

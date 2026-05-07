@@ -244,6 +244,10 @@
 "settings.llmSpend.group.officialClaude.fiveHour.template" = "5h: {percent}% · resets in {resetIn}";
 "settings.llmSpend.group.deepseek.balance.template" = "Balance: {amount} {currency}";
 "settings.llmSpend.group.deepseek.balance.unavailable" = "Balance: {amount} {currency} (account unavailable)";
+"settings.llmSpend.group.thirdParty.metered" = "{name} · metered USD";
+"settings.llmSpend.group.thirdParty.includedQuota" = "{name} · pre-paid quota";
+"settings.llmSpend.group.thirdParty.tokenOnly" = "{name} · token-only";
+"settings.llmSpend.group.thirdParty.unknown" = "Billing data unavailable";
 "settings.llmSpend.byClient" = "By client (today)";
 "settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";
