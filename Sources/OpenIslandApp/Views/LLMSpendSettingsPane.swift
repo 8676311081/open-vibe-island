@@ -13,6 +13,11 @@ struct LLMSpendSettingsPane: View {
     @State private var showStatsSheet: Bool = false
     @State private var showRTKConfirmSheet: Bool = false
     @State private var agentSnapshots: [AgentUsageSnapshot] = []
+    /// DeepSeek balance snapshot, read from
+    /// `LLMProxyCoordinator.deepseekBalance` actor at appear time
+    /// and (in the future) on a manual refresh button. Nil while
+    /// the cache is empty or the credential is missing.
+    @State private var deepseekBalanceSnapshot: DeepSeekBalanceSnapshot?
 
     private var lang: LanguageManager { model.lang }
 
@@ -56,6 +61,7 @@ struct LLMSpendSettingsPane: View {
             // 30 s watchdog tick.
             model.hooks.refreshRtkStatus()
             Task { @MainActor in await loadAgentUsages() }
+            Task { @MainActor in await loadDeepseekBalance() }
         }
         .onChange(of: model.llmProxyPort) { _, _ in syncFields() }
         .onChange(of: model.llmProxyOpenAIUpstream) { _, _ in syncFields() }
@@ -169,14 +175,23 @@ struct LLMSpendSettingsPane: View {
     }
 
     /// Optional one-line subtitle under a card's headline metric.
-    /// Subscription cards (officialClaude) read the 5h window from
-    /// `ClaudeUsageLoader`'s statusline cache; metered cards add
-    /// nothing here yet (P5/P6 land balance + included-quota
-    /// strips). Returns nil when there's nothing useful — UI
-    /// renders no extra line in that case.
+    /// Per-shape detail rows: subscription window for
+    /// officialClaude, account balance for deepseek. Third-party
+    /// stays blank for now — its detail rows are per-profile
+    /// adapters in a follow-up commit.
     private func groupDetailLine(for group: ProviderGroup) -> String? {
-        guard group == .officialClaude,
-              let snapshot = model.claudeUsageSnapshot,
+        switch group {
+        case .officialClaude:
+            return officialClaudeDetailLine()
+        case .deepseek:
+            return deepseekDetailLine()
+        case .thirdParty:
+            return nil
+        }
+    }
+
+    private func officialClaudeDetailLine() -> String? {
+        guard let snapshot = model.claudeUsageSnapshot,
               let window = snapshot.fiveHour
         else {
             return nil
@@ -195,6 +210,25 @@ struct LLMSpendSettingsPane: View {
         return template
             .replacingOccurrences(of: "{percent}", with: "\(pct)")
             .replacingOccurrences(of: "{resetIn}", with: resetsIn)
+    }
+
+    private func deepseekDetailLine() -> String? {
+        guard let snapshot = deepseekBalanceSnapshot else {
+            return nil
+        }
+        // Format with two decimals — DeepSeek balances are USD
+        // values that benefit from the precision (a $0.012 spend
+        // matters when the total is $14.20).
+        let amount = String(format: "%.2f", snapshot.totalBalance)
+        let template: String
+        if !snapshot.isAvailable {
+            template = lang.t("settings.llmSpend.group.deepseek.balance.unavailable")
+        } else {
+            template = lang.t("settings.llmSpend.group.deepseek.balance.template")
+        }
+        return template
+            .replacingOccurrences(of: "{amount}", with: amount)
+            .replacingOccurrences(of: "{currency}", with: snapshot.currency)
     }
 
     /// Format a positive duration as "1h 23m" / "47m" / "30s".
@@ -898,6 +932,30 @@ struct LLMSpendSettingsPane: View {
             }
         }
         self.agentSnapshots = collected
+    }
+
+    /// Read the cached DeepSeek balance, optionally triggering a
+    /// network refresh when the cache is stale (>15 min) or empty.
+    /// Failures (missing credential, HTTP error) are swallowed —
+    /// the card detail line just stays absent until the user
+    /// configures a key + the next pane appearance retries.
+    @MainActor
+    private func loadDeepseekBalance() async {
+        let provider = model.llmProxy.deepseekBalance
+        let cached = await provider.cachedSnapshot()
+        let stale = await provider.isStale()
+        if let cached, !stale {
+            self.deepseekBalanceSnapshot = cached
+            return
+        }
+        do {
+            self.deepseekBalanceSnapshot = try await provider.refresh()
+        } catch {
+            // Keep whatever we had — a stale snapshot is better
+            // than nothing, and no snapshot is better than a
+            // misleading "$0.00".
+            self.deepseekBalanceSnapshot = cached
+        }
     }
 
     @ViewBuilder

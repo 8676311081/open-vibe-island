@@ -242,6 +242,8 @@
 "settings.llmSpend.group.todayLabel" = "today";
 "settings.llmSpend.group.officialClaude.fiveHour" = "5h:";
 "settings.llmSpend.group.officialClaude.fiveHour.template" = "5h: {percent}% · resets in {resetIn}";
+"settings.llmSpend.group.deepseek.balance.template" = "Balance: {amount} {currency}";
+"settings.llmSpend.group.deepseek.balance.unavailable" = "Balance: {amount} {currency} (account unavailable)";
 "settings.llmSpend.byClient" = "By client (today)";
 "settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";

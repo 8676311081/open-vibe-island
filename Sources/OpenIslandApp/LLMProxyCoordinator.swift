@@ -48,6 +48,12 @@ final class LLMProxyCoordinator {
     /// it safe for three servers to read concurrently; mutations
     /// (profile add / active flip) come from the main actor.
     let profileStore: UpstreamProfileStore
+    /// DeepSeek `/user/balance` poller — exposes `cachedSnapshot()`
+    /// for synchronous UI reads + `refresh()` for the manual
+    /// refresh button. Lives at the coordinator so the cache is
+    /// shared across whatever views eventually consume it
+    /// (initially the 9711 spend-card detail row).
+    let deepseekBalance: DeepSeekBalanceProvider
     private(set) var isRunning = false
 
     /// Loopback port for the official-Claude listener. The legacy
@@ -92,6 +98,9 @@ final class LLMProxyCoordinator {
         let profiles = UpstreamProfileStore()
         self.credentialsStore = credentials
         self.profileStore = profiles
+        self.deepseekBalance = DeepSeekBalanceProvider(
+            credentialsStore: credentials
+        )
         // Run the legacy-upstream migration BEFORE building any
         // listener, so a profile that was implicit in the old
         // single-listener `openAIUpstream` / `anthropicUpstream`

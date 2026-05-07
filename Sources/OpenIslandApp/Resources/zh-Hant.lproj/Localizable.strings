@@ -211,6 +211,8 @@
 "settings.llmSpend.group.todayLabel" = "今日";
 "settings.llmSpend.group.officialClaude.fiveHour" = "5 小時：";
 "settings.llmSpend.group.officialClaude.fiveHour.template" = "5 小時：已用 {percent}% · {resetIn} 後重設";
+"settings.llmSpend.group.deepseek.balance.template" = "餘額：{amount} {currency}";
+"settings.llmSpend.group.deepseek.balance.unavailable" = "餘額：{amount} {currency}（帳戶不可用）";
 "settings.llmSpend.byClient" = "今日各用戶端";
 "settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "輪次";
