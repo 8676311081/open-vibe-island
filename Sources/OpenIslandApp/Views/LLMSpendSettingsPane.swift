@@ -97,30 +97,120 @@ struct LLMSpendSettingsPane: View {
     }
 
     private var statusRow: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 8) {
+        // Three-port status row replaces the legacy single
+        // "proxy running on 9710 · today $0.02" line. Each card
+        // surfaces one ProviderGroup with a shape-appropriate
+        // metric — see BillingShape for why we don't unify on USD.
+        // Card order matches ProviderGroup.allCases (stable):
+        // officialClaude → deepseek → thirdParty.
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ForEach(ProviderGroup.allCases, id: \.self) { group in
+                    groupStatusCard(for: group)
+                }
+            }
+            // Cross-group total still useful as a glance — kept on
+            // its own row instead of the right-side pill it used to
+            // occupy. Less prominent than per-group cards because
+            // the unified "today total" can mix subscription tokens
+            // with metered USD, which doesn't really sum.
+            HStack {
+                Spacer()
+                todayPill
+            }
+        }
+    }
+
+    private func groupStatusCard(for group: ProviderGroup) -> some View {
+        let bucket = todayGroupBucket(for: group)
+        let port = group.defaultLoopbackPort
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Circle()
                     .fill(model.isLLMProxyRunning ? Color.green : Color.secondary)
-                    .frame(width: 8, height: 8)
-                Text(model.isLLMProxyRunning
-                     ? lang.t("settings.llmSpend.proxyRunning")
-                     : lang.t("settings.llmSpend.proxyStopped"))
-                    .font(.subheadline.weight(.medium))
+                    .frame(width: 6, height: 6)
+                Text("\(port)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(lang.t(groupTitleKey(for: group)))
+                    .font(.caption.weight(.semibold))
             }
-
-            Divider().frame(height: 16)
-
-            Text("\(lang.t("settings.llmSpend.port")): 127.0.0.1:\(model.llmProxyPort)")
-                .font(.subheadline)
+            // Primary metric. BillingShape decides what's
+            // foregrounded — subscription groups suppress USD,
+            // metered groups suppress raw token counts as the
+            // headline. Empty / unknown groups show "—".
+            Text(groupHeadlineMetric(group: group, bucket: bucket))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(lang.t("settings.llmSpend.group.todayLabel"))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
-
-            Spacer()
-
-            todayPill
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Pull today's per-group totals out of the snapshot. Each
+    /// `LLMDayBucket` carries `groupTurns / groupCosts /
+    /// groupTokens` (added in the stats-attribution commit); we
+    /// sum those across all clients so the cards represent the
+    /// listener-level activity for the day.
+    private struct GroupBucket {
+        var turns: Int = 0
+        var tokens: Int = 0
+        var costUSD: Double = 0
+        var hasCost: Bool = false  // any client recorded a cost vs unpriced-only
+    }
+
+    private func todayGroupBucket(for group: ProviderGroup) -> GroupBucket {
+        var out = GroupBucket()
+        let groupKey = group.rawValue
+        for bucket in todayBuckets.values {
+            out.turns += bucket.groupTurns[groupKey] ?? 0
+            out.tokens += bucket.groupTokens[groupKey] ?? 0
+            if let c = bucket.groupCosts[groupKey] {
+                out.costUSD += c
+                out.hasCost = true
+            }
+        }
+        return out
+    }
+
+    private func groupTitleKey(for group: ProviderGroup) -> String {
+        switch group {
+        case .officialClaude: return "settings.llmSpend.group.officialClaude"
+        case .deepseek: return "settings.llmSpend.group.deepseek"
+        case .thirdParty: return "settings.llmSpend.group.thirdParty"
+        }
+    }
+
+    /// Choose the right headline number for a card based on the
+    /// group's billing shape. Subscription windows show tokens
+    /// (Claude Max isn't priced per-request); metered groups show
+    /// USD; mixed third-party falls back to whichever signal we
+    /// actually have.
+    private func groupHeadlineMetric(
+        group: ProviderGroup,
+        bucket: GroupBucket
+    ) -> String {
+        if bucket.turns == 0 {
+            return "—"
+        }
+        switch group {
+        case .officialClaude:
+            // Subscription — token count is the load signal, USD
+            // makes no sense.
+            return formattedTokens(bucket.tokens)
+        case .deepseek, .thirdParty:
+            return bucket.hasCost
+                ? LLMSpendFormatting.formatCost(bucket.costUSD)
+                : formattedTokens(bucket.tokens)
+        }
     }
 
     private var todayPill: some View {
@@ -130,7 +220,7 @@ struct LLMSpendSettingsPane: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(totals.costDisplay)
-                .font(.title3.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(totals.hasUnpriced ? Color.orange : Color.primary)
                 .help(totals.hasUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
         }

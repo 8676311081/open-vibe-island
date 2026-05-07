@@ -205,6 +205,10 @@
 "settings.llmSpend.proxyStopped" = "代理未執行";
 "settings.llmSpend.port" = "連接埠";
 "settings.llmSpend.todayTotal" = "今日";
+"settings.llmSpend.group.officialClaude" = "Claude（官方）";
+"settings.llmSpend.group.deepseek" = "DeepSeek";
+"settings.llmSpend.group.thirdParty" = "第三方";
+"settings.llmSpend.group.todayLabel" = "今日";
 "settings.llmSpend.byClient" = "今日各用戶端";
 "settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "輪次";

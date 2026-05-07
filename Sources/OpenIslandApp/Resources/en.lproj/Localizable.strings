@@ -236,6 +236,10 @@
 "settings.llmSpend.proxyStopped" = "Proxy stopped";
 "settings.llmSpend.port" = "Port";
 "settings.llmSpend.todayTotal" = "Today";
+"settings.llmSpend.group.officialClaude" = "Claude (official)";
+"settings.llmSpend.group.deepseek" = "DeepSeek";
+"settings.llmSpend.group.thirdParty" = "Third-party";
+"settings.llmSpend.group.todayLabel" = "today";
 "settings.llmSpend.byClient" = "By client (today)";
 "settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";
