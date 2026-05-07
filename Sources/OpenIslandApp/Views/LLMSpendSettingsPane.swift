@@ -485,23 +485,33 @@ struct LLMSpendSettingsPane: View {
     }
 
     private func duplicateWarningSection(_ warning: LastWarning) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(lang.t("settings.llmSpend.lastWarning"))
-                    .font(.subheadline.weight(.semibold))
-                Text(String(
-                    format: lang.t("settings.llmSpend.lastWarningTemplate"),
-                    warning.toolName,
-                    warning.formattedTime
-                ))
-                .font(.caption)
+        // Codex's review: this banner is an agent-health signal,
+        // not a billing one — at risk of distorting the cost/usage
+        // mental model when it sits inline between spend cards and
+        // controls. Until we ship a dedicated "Agent Health"
+        // settings pane, the compromise is a quieter inline row:
+        // smaller text, no yellow tint card, easy to ignore at a
+        // glance but still visible for the user who notices the
+        // pattern. Future commit: move into its own pane and leave
+        // a one-line "see Health for X" pointer here.
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(.secondary)
-            }
+                .font(.caption)
+            Text(lang.t("settings.llmSpend.lastWarning"))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(String(
+                format: lang.t("settings.llmSpend.lastWarningTemplate"),
+                warning.toolName,
+                warning.formattedTime
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Spacer()
         }
-        .padding(12)
-        .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
     }
 
     private var controlsSection: some View {
