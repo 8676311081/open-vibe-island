@@ -209,6 +209,8 @@
 "settings.llmSpend.group.deepseek" = "DeepSeek";
 "settings.llmSpend.group.thirdParty" = "第三方";
 "settings.llmSpend.group.todayLabel" = "今日";
+"settings.llmSpend.group.officialClaude.fiveHour" = "5 小時：";
+"settings.llmSpend.group.officialClaude.fiveHour.template" = "5 小時：已用 {percent}% · {resetIn} 後重設";
 "settings.llmSpend.byClient" = "今日各用戶端";
 "settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "輪次";

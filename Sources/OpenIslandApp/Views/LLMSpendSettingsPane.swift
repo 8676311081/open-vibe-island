@@ -148,11 +148,68 @@ struct LLMSpendSettingsPane: View {
             Text(lang.t("settings.llmSpend.group.todayLabel"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            // Per-group detail strip. Only `officialClaude` has one
+            // so far — the 5h subscription window from
+            // ClaudeUsageLoader's statusline cache. DeepSeek's
+            // balance line and third-party billing-shape rows land
+            // in subsequent commits.
+            if let detail = groupDetailLine(for: group) {
+                Divider().padding(.top, 4)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Optional one-line subtitle under a card's headline metric.
+    /// Subscription cards (officialClaude) read the 5h window from
+    /// `ClaudeUsageLoader`'s statusline cache; metered cards add
+    /// nothing here yet (P5/P6 land balance + included-quota
+    /// strips). Returns nil when there's nothing useful — UI
+    /// renders no extra line in that case.
+    private func groupDetailLine(for group: ProviderGroup) -> String? {
+        guard group == .officialClaude,
+              let snapshot = model.claudeUsageSnapshot,
+              let window = snapshot.fiveHour
+        else {
+            return nil
+        }
+        let pct = window.roundedUsedPercentage
+        let baseLabel = lang.t("settings.llmSpend.group.officialClaude.fiveHour")
+        guard let resetsAt = window.resetsAt else {
+            return "\(baseLabel) \(pct)%"
+        }
+        let interval = resetsAt.timeIntervalSinceNow
+        if interval <= 0 {
+            return "\(baseLabel) \(pct)%"
+        }
+        let resetsIn = formatRelativeDuration(seconds: Int(interval))
+        let template = lang.t("settings.llmSpend.group.officialClaude.fiveHour.template")
+        return template
+            .replacingOccurrences(of: "{percent}", with: "\(pct)")
+            .replacingOccurrences(of: "{resetIn}", with: resetsIn)
+    }
+
+    /// Format a positive duration as "1h 23m" / "47m" / "30s".
+    /// Kept inline because it's only used by the quota subtitle —
+    /// global helpers can come later if more cards need it.
+    private func formatRelativeDuration(seconds total: Int) -> String {
+        if total >= 3600 {
+            let h = total / 3600
+            let m = (total % 3600) / 60
+            return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+        }
+        if total >= 60 {
+            return "\(total / 60)m"
+        }
+        return "\(total)s"
     }
 
     /// Pull today's per-group totals out of the snapshot. Each

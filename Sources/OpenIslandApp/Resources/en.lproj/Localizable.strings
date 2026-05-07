@@ -240,6 +240,8 @@
 "settings.llmSpend.group.deepseek" = "DeepSeek";
 "settings.llmSpend.group.thirdParty" = "Third-party";
 "settings.llmSpend.group.todayLabel" = "today";
+"settings.llmSpend.group.officialClaude.fiveHour" = "5h:";
+"settings.llmSpend.group.officialClaude.fiveHour.template" = "5h: {percent}% · resets in {resetIn}";
 "settings.llmSpend.byClient" = "By client (today)";
 "settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";
