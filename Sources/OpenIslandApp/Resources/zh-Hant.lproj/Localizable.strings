@@ -217,6 +217,7 @@
 "settings.llmSpend.group.thirdParty.includedQuota" = "{name} · 套餐額度";
 "settings.llmSpend.group.thirdParty.tokenOnly" = "{name} · 僅記 token";
 "settings.llmSpend.group.thirdParty.unknown" = "暫無帳單資料";
+"settings.llmSpend.compression.scopeNote" = "節省資料為所有連接埠彙總（按 provider 分組歸屬即將上線）。";
 "settings.llmSpend.byClient" = "今日各用戶端";
 "settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "輪次";

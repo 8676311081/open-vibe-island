@@ -803,6 +803,18 @@ struct LLMSpendSettingsPane: View {
                let summary = model.llmStatsSnapshot.compressionSummary,
                summary.totalCommands > 0 {
                 compressionStatsRow(summary)
+                // Three-port disclosure: RTK reports global savings,
+                // not per-group. Shim P3 already injects
+                // OPEN_ISLAND_PROVIDER_GROUP into the hook env so a
+                // future RTK-side change (or our own per-group
+                // counter) can split this; today we just say so
+                // explicitly instead of letting users assume the
+                // savings number is scoped to whichever card they
+                // happen to be looking at.
+                Text(lang.t("settings.llmSpend.compression.scopeNote"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

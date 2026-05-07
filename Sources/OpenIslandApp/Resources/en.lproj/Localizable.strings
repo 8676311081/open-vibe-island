@@ -248,6 +248,7 @@
 "settings.llmSpend.group.thirdParty.includedQuota" = "{name} · pre-paid quota";
 "settings.llmSpend.group.thirdParty.tokenOnly" = "{name} · token-only";
 "settings.llmSpend.group.thirdParty.unknown" = "Billing data unavailable";
+"settings.llmSpend.compression.scopeNote" = "Savings shown are aggregated across all listeners (per-group attribution coming soon).";
 "settings.llmSpend.byClient" = "By client (today)";
 "settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";
